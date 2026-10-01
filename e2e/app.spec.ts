@@ -79,7 +79,7 @@ test("editing one cell and saving rewrites only that line", async ({ page }) => 
   await clickCell(page, 1, 2);
   await page.keyboard.press("Enter");
   const editor = page.locator(".cell-editor textarea");
-  await expect(editor).toHaveValue("Can create a new test case inside the TestSpec");
+  await expect(editor).toHaveValue("Can add a card to the list");
   await editor.press("Control+a");
   await editor.fill("Edited subject");
   await editor.press("Enter");
@@ -106,7 +106,7 @@ test("undo, multi-line edit with Alt+Enter and variable completion", async ({ pa
   await editor.press("End");
   await editor.press("Control+End");
   await editor.press("Alt+Enter");
-  await editor.pressSequentially("Click {{dialog_con");
+  await editor.pressSequentially("Click {{dialog_confirm_del");
   await expect(page.locator(".completion li").first()).toHaveText("{{dialog_confirm_delete_button}}");
   await editor.press("Enter"); // accept completion
   await editor.press("Enter"); // commit
@@ -172,17 +172,20 @@ test("labels and images columns: add, paste a label, paste an image", async ({ p
   await expect(page.locator(".toast", { hasText: "tests/cases.csv を保存しました" })).toBeVisible();
   const saved = Buffer.from((await readRepoFile(page, "tests/cases.csv"))!).toString("utf8");
   expect(saved.split("\r\n")[0]).toBe("﻿No,Labels,Test Subject,Preconditions,Steps,Expected Result,Notes,Images");
-  expect(saved.split("\r\n")[1]).toMatch(/^1,Normal Case,Can create a new project/);
+  expect(saved.split("\r\n")[1]).toMatch(/^1,Normal Case,Can create a new board/);
   await page.waitForTimeout(300);
   await page.screenshot({ path: "e2e-results/labels-images.png" });
 });
 
 test("case-N references jump, filters and validation", async ({ page }) => {
   await openRepo(page);
-  // case-2's precondition "A project has been created in case-1" wraps; the link starts the second line.
-  await page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.scrollTo(2, 1));
+  // Make case-2's precondition start with the link so its position is known, then click it.
+  await clickCell(page, 2, 1);
+  await page.keyboard.press("Enter");
+  await page.locator(".cell-editor textarea").fill("case-1 is done");
+  await page.locator(".cell-editor textarea").press("Enter");
   const b = await page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.getBounds(2, 1));
-  await page.mouse.click(b!.x + 16, b!.y + 8 + 21 + 10);
+  await page.mouse.click(b!.x + 16, b!.y + 8 + 10);
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.selected()))
     .toEqual([0, 0]);
@@ -197,5 +200,5 @@ test("case-N references jump, filters and validation", async ({ page }) => {
 
   await page.getByRole("textbox", { name: "行を絞り込み" }).fill("delete");
   await expect(page.locator(".filter-bar")).toHaveCount(0);
-  await expect(page.locator(".status-bar")).toContainText("4 / 9 行");
+  await expect(page.locator(".status-bar")).toContainText("3 / 9 行");
 });

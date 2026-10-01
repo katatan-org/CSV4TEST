@@ -83,3 +83,7 @@ npm run typecheck
 - `src/editor/` — Undo / Redo、クリップボード（TSV）、検索と置換、変更の計算、表示行の計算
 - `src/ui/` — Glide Data Grid のカスタムセル（Canvas 描画）とエディター、パネル類
 - `src/fs/` — File System Access API、画像の読み書き
+
+## ライセンス
+
+[MIT](LICENSE)

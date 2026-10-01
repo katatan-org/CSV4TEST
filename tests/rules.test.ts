@@ -140,8 +140,8 @@ describe("find and replace", () => {
   it("finds and replaces literal and regex patterns", () => {
     const doc = katatan();
     const lit = { regex: false, caseSensitive: false };
-    const p = buildPattern("{{app_spec_url}}", lit) as RegExp;
-    expect(findMatches(doc.records.slice(1), 6, p, lit).map((m) => m.col)).toEqual([3, 3, 3, 3]);
+    const p = buildPattern("{{app_board_url}}", lit) as RegExp;
+    expect(findMatches(doc.records.slice(1), 6, p, lit).map((m) => m.col)).toEqual([3, 3, 3, 3, 3, 3]);
     const re = { regex: true, caseSensitive: true };
     const p2 = buildPattern("case-(\\d)", re) as RegExp;
     expect(replaceAll("in case-1", p2, "#$1", re)).toBe("in #1");

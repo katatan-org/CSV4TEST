@@ -88,7 +88,7 @@ describe("parsing", () => {
     ]);
     const steps = cellValue(doc.records[1], 3).split("\n");
     expect(steps).toHaveLength(5);
-    expect(steps[2]).toBe("Click {{dashboard_create_project_button}}");
+    expect(steps[2]).toBe("Click {{home_create_board_button}}");
   });
 
   it("detects delimiters", () => {
@@ -134,7 +134,7 @@ describe("editing keeps diffs minimal", () => {
     const doc = katatan();
     const { doc: added } = insertRecords(doc, doc.records.length, [["10", "New case"]]);
     const text = docToText(added);
-    expect(text.endsWith('the project list",\r\n10,New case,,,,')).toBe(true);
+    expect(text.endsWith('fails",\r\n10,New case,,,,')).toBe(true);
   });
 
   it("insert, delete and move records", () => {
