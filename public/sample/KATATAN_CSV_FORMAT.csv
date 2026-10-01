@@ -1,0 +1,35 @@
+﻿No,Test Subject,Preconditions,Steps,Expected Result,Notes
+1,Can create a new project from the dashboard,User is logged in,"Navigate to {{app_login_url}} and log in with email address and password
+Navigate to {{app_dashboard_url}}
+Click {{dashboard_create_project_button}}
+Enter the project name 'E2E Test Project' in {{dialog_project_name_input}}
+Click {{dialog_create_submit_button}}","Redirected to the project page, and the URL contains /project/{projectId}",
+2,Can create a new TestSpec inside the created project,A project has been created in case-1,"Navigate to {{app_project_url}} (using the projectId obtained in case-1)
+Click {{spec_create_button}}
+Enter 'E2E Test Spec' in {{spec_name_input}}
+Click {{dialog_create_submit_button}}","Redirected to the TestSpec page, and 'E2E Test Spec' is displayed",
+3,Can create a new test case inside the TestSpec,A TestSpec has been created in case-2,"Navigate to {{app_spec_url}}
+Click {{testcase_add_row_button}}
+Click the last added row to enter edit mode
+Type 'Sample Test Case' and press the Escape key",'Sample Test Case' appears in the TestCase list,
+4,Can create a report by entering a report name via the Start Test button,A test case exists from case-3,"Navigate to {{app_spec_url}}
+Click {{spec_start_test_button}}
+Enter 'E2E Test Run' in {{report_name_input}}
+Click {{report_start_confirm_button}}","Redirected to the report detail page, and 'E2E Test Run' is displayed",
+5,Can record an OK result for a test case in the report detail screen,A report has been created in case-4,"Navigate to the report detail page created in case-4
+Select 'OK' in the first row of {{report_result_select}}",The select box has the 'select-ok' class applied and is in the OK state,
+6,Can delete a report,A report has been created in case-4,"Navigate to {{app_spec_url}}
+Click {{report_action_menu_button}}
+Click {{dropdown_delete_item}}
+Click {{dialog_confirm_delete_button}}",'E2E Test Run' disappears from the report list,
+7,Can delete a test case from the TestCase list,A test case exists from case-3,"Navigate to {{app_spec_url}}
+Click the first row of {{testcase_row_checkbox}} to select it
+Click {{testcase_delete_button}}
+Click {{testcase_delete_confirm_button}}",'Sample Test Case' disappears from the TestCase list,
+8,Can delete a TestSpec from the TestSpec list,A TestSpec has been created in case-2,"Navigate to {{app_project_url}}
+Click {{spec_action_menu_button}}
+Click {{dropdown_delete_item}}
+Click {{dialog_confirm_delete_button}}",'E2E Test Spec' disappears from the TestSpec list,
+9,Can delete the project from the project settings screen,A project has been created in case-1,"Navigate to {{app_project_settings_url}}
+Click {{project_danger_delete_button}}
+Click {{dialog_confirm_delete_button}}","Redirected to the dashboard, and 'E2E Test Project' disappears from the project list",

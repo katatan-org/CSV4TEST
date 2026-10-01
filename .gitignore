@@ -1,0 +1,5 @@
+node_modules
+dist
+*.local
+e2e-results
+playwright-report
