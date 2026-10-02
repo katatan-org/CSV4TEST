@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { deleteColumn, deleteRecords, docFromBytes, docFromText, insertColumn, insertRecords, moveRecords, setCells } from "../src/csv/document";
+import { deleteColumn, deleteRecords, docFromBytes, docFromText, docToText, insertColumn, insertRecords, moveRecords, setCells } from "../src/csv/document";
 import { columnMapping, computeChanges, isCellDirty } from "../src/editor/changes";
-import { computeViewRows, EMPTY_VIEW, sortSnapshot } from "../src/editor/viewRows";
+import { computeViewRows, editViewCells, EMPTY_VIEW, rowsAddedBy, sortSnapshot } from "../src/editor/viewRows";
 import { resolveRules } from "../src/rules/detect";
 import { tokenize } from "../src/rules/tokens";
 import { layoutCell } from "../src/ui/cellLayout";
@@ -145,5 +145,25 @@ describe("view rows", () => {
     expect(names({ filters: [{ col: 2, text: "al" }] })).toEqual(["Alpha"]);
     expect(names({ labels: ["Smoke"], labelCol: 1 })).toEqual(["beta", "Alpha"]);
     expect(names({ quick: "gam" })).toEqual(["gamma"]);
+  });
+});
+
+describe("editing below the data", () => {
+  const doc = docFromText("a,b,c\r\n1,2,3\r\n");
+  const rows = () => computeViewRows(doc.records, EMPTY_VIEW);
+
+  it("fills the gap with empty records", () => {
+    const edits = [{ row: 3, col: 1, value: "x" }];
+    expect(rowsAddedBy(1, edits)).toBe(3);
+    expect(docToText(editViewCells(doc, rows(), edits))).toBe("a,b,c\r\n1,2,3\r\n,,\r\n,,\r\n,x,\r\n");
+  });
+
+  it("edits existing rows in place and ignores clearing blank rows", () => {
+    const edits = [
+      { row: 0, col: 0, value: "9" },
+      { row: 5, col: 0, value: "" },
+    ];
+    expect(rowsAddedBy(1, edits)).toBe(0);
+    expect(docToText(editViewCells(doc, rows(), edits))).toBe("a,b,c\r\n9,2,3\r\n");
   });
 });

@@ -1,6 +1,10 @@
 import {
+  AllCellRenderers,
   CompactSelection,
-  DataEditor,
+  DataEditorCore,
+  ImageWindowLoaderImpl,
+  markerCellRenderer,
+  sprites,
   type DataEditorProps,
   type DataEditorRef,
   type EditListItem,
@@ -11,14 +15,16 @@ import {
   type Rectangle,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
-import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
-import { cellValue, columnCount, insertRecords, setCells, type CellEdit, type CsvDoc } from "../csv/document";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { cellValue, columnCount, setCells, type CellEdit, type CsvDoc } from "../csv/document";
 import type { CsvRecord } from "../csv/types";
 import { isCellDirty } from "../editor/changes";
 import { parseTsv, toTsv } from "../editor/clipboard";
+import { editViewCells, rowsAddedBy, type ViewCellEdit } from "../editor/viewRows";
 import type { ResolvedRules } from "../rules/detect";
 import { headerMatches } from "../rules/schema";
 import { MAX_ROW_HEIGHT, MIN_ROW_HEIGHT, cellHeight } from "./cellLayout";
+import { Icon } from "./icons";
 import { createRichRenderer, isRichCell, richCell } from "./richCell";
 import { backgroundColor, gridTheme, textColor, type ThemeMode } from "./theme";
 import type { ViewContext } from "./view";
@@ -34,11 +40,14 @@ export interface GridProps {
   onSelectionChange(sel: GridSelection): void;
   /** Row drag & drop is only allowed when the view shows the file order. */
   canMoveRows: boolean;
+  /** Show blank rows below the data that become records when typed into (off while filtered). */
+  canExtend: boolean;
   highlights: DataEditorProps["highlightRegions"];
   apply(label: string, update: (doc: CsvDoc) => CsvDoc): void;
-  /** Fills id columns etc. for rows about to be created. */
-  prepareNewRows(doc: CsvDoc, rows: string[][]): string[][];
-  onAppendRow(): void;
+  /** Inserts a blank row next to the record shown at view row `row`. */
+  onInsertRow(row: number, below: boolean): void;
+  /** Inserts a column before index `at`. */
+  onInsertColumn(at: number): void;
   onMoveRow(from: number, to: number): void;
   onMoveColumn(from: number, to: number): void;
   onColumnResize(col: number, width: number): void;
@@ -47,6 +56,21 @@ export interface GridProps {
   onImageFiles(recordId: number, files: File[]): void;
   gridRef: RefObject<DataEditorRef>;
 }
+
+// With row dragging on, Glide only toggles a row from the 20px around its number;
+// the rest of the row number cell should select the row too.
+const wholeCellMarker: typeof markerCellRenderer = { ...markerCellRenderer, onClick: (e) => ({ ...e.cell, checked: !e.cell.checked }) };
+const cellRenderers = AllCellRenderers.map((r) => (r === markerCellRenderer ? (wholeCellMarker as (typeof AllCellRenderers)[number]) : r));
+
+/** Blank rows shown below the data, so any cell there can be typed into. */
+const BLANK_ROWS = 50;
+
+interface Hover {
+  kind: "row" | "column";
+  index: number;
+}
+
+const sameHover = (a: Hover | null, b: Hover | null) => a === b || (!!a && !!b && a.kind === b.kind && a.index === b.index);
 
 export const emptySelection: GridSelection = {
   columns: CompactSelection.empty(),
@@ -86,15 +110,16 @@ export function Grid(props: GridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const renderers = useMemo(() => [createRichRenderer(viewRef)], []);
+  const imageWindowLoader = useMemo(() => new ImageWindowLoaderImpl(), []);
   const theme = useMemo(() => gridTheme(mode), [mode]);
   const colCount = rules.columns.length;
+  const rowCount = rows.length + (props.canExtend ? BLANK_ROWS : 0);
 
   const freezeColumns = useMemo(() => {
     let n = 0;
     while (n < rules.columns.length && rules.columns[n].rule.pinned) n++;
     return n;
   }, [rules.columns]);
-  const hintColumn = freezeColumns < colCount ? freezeColumns : 0;
 
   const columns = useMemo<GridColumn[]>(
     () =>
@@ -103,10 +128,8 @@ export function Grid(props: GridProps) {
         title: c.header === "" ? `(列 ${i + 1})` : c.header,
         width: widths[i],
         hasMenu: true,
-        // Glide shows the "add row" hint in the first column unless a column carries it.
-        trailingRowOptions: i === hintColumn ? { hint: "行を追加" } : { hint: "" },
       })),
-    [rules.columns, widths, hintColumn],
+    [rules.columns, widths],
   );
 
   const getCellContent = useCallback(
@@ -170,12 +193,14 @@ export function Grid(props: GridProps) {
 
   const onCellsEdited = useCallback(
     (items: readonly EditListItem[]) => {
-      const edits: CellEdit[] = [];
+      const edits: ViewCellEdit[] = [];
       for (const { location, value } of items) {
-        const record = rows[location[1]];
-        if (record && isRichCell(value)) edits.push({ recordId: record.id, col: location[0], value: value.data.value });
+        if (isRichCell(value)) edits.push({ row: location[1], col: location[0], value: value.data.value });
       }
-      if (edits.length > 0) apply(edits.length > 1 ? `${edits.length}セルを編集` : "セルを編集", (d) => setCells(d, edits));
+      if (edits.length === 0) return true;
+      const added = rowsAddedBy(rows.length, edits);
+      const label = edits.length > 1 ? `${edits.length}セルを編集` : "セルを編集";
+      apply(added > 0 ? `${label}（${added}行追加）` : label, (d) => editViewCells(d, rows, edits));
       return true;
     },
     [rows, apply],
@@ -251,26 +276,14 @@ export function Grid(props: GridProps) {
         values = Array.from({ length: rect.height }, () => Array<string>(rect.width).fill(values[0][0]));
       }
       const width = columnCount(p.doc);
-      const edits: CellEdit[] = [];
-      const extra: string[][] = [];
+      const edits: ViewCellEdit[] = [];
       values.forEach((line, dy) => {
-        const record = p.rows[rect.y + dy];
-        if (record) {
-          line.forEach((v, dx) => {
-            if (rect.x + dx < width) edits.push({ recordId: record.id, col: rect.x + dx, value: v });
-          });
-        } else {
-          const row = Array<string>(width).fill("");
-          line.forEach((v, dx) => {
-            if (rect.x + dx < width) row[rect.x + dx] = v;
-          });
-          extra.push(row);
-        }
+        line.forEach((v, dx) => {
+          if (rect.x + dx < width) edits.push({ row: rect.y + dy, col: rect.x + dx, value: v });
+        });
       });
-      p.apply(extra.length > 0 ? `貼り付け（${extra.length}行追加）` : "貼り付け", (d) => {
-        const edited = setCells(d, edits);
-        return extra.length > 0 ? insertRecords(edited, edited.records.length, p.prepareNewRows(edited, extra)).doc : edited;
-      });
+      const added = rowsAddedBy(p.rows.length, edits);
+      p.apply(added > 0 ? `貼り付け（${added}行追加）` : "貼り付け", (d) => editViewCells(d, p.rows, edits));
     };
     const copy = (e: ClipboardEvent) => onCopy(e, false);
     const cut = (e: ClipboardEvent) => onCopy(e, true);
@@ -286,12 +299,97 @@ export function Grid(props: GridProps) {
 
   const imageColAt = (col: number) => rules.columns[col]?.rule.display === "images";
 
+  // Insert buttons on the borders of the hovered row number / column header.
+  // Hit-tested here on every pointer move rather than via Glide's onItemHovered, which
+  // only fires when the item changes and skips moves it considers obscured.
+  const [hover, setHover] = useState<Hover | null>(null);
+  const visible = useRef<Rectangle>({ x: 0, y: 0, width: 0, height: 0 });
+  const scrollOffset = useRef<[number, number]>([0, 0]);
+  const hideTimer = useRef<number>();
+  const keepHover = () => window.clearTimeout(hideTimer.current);
+  const hideHover = (delay = 200) => {
+    keepHover();
+    hideTimer.current = window.setTimeout(() => setHover(null), delay);
+  };
+  useEffect(() => keepHover, []);
+
+  const hitTest = (x: number, y: number): Hover | null => {
+    const grid = gridRef.current;
+    if (!grid) return null;
+    const inside = (b: Rectangle | undefined) => !!b && x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height;
+    const v = visible.current;
+    for (let row = Math.max(0, v.y); row <= v.y + v.height && row < rows.length; row++) {
+      if (inside(grid.getBounds(-1, row))) return { kind: "row", index: row };
+    }
+    // Frozen columns first: they cover the scrolled ones.
+    const cols = [...Array.from({ length: freezeColumns }, (_, i) => i), ...Array.from({ length: v.width + 1 }, (_, i) => v.x + i)];
+    for (const col of cols) {
+      if (col < colCount && inside(grid.getBounds(col, -1))) return { kind: "column", index: col };
+    }
+    return null;
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if ((e.target as Element).closest(".grid-insert")) {
+      keepHover();
+      return;
+    }
+    const h = e.buttons === 0 ? hitTest(e.clientX, e.clientY) : null;
+    if (!h) {
+      hideHover();
+      return;
+    }
+    keepHover();
+    setHover((prev) => (sameHover(prev, h) ? prev : h));
+  };
+
+  const insertButton = (key: string, x: number, y: number, title: string, onClick: () => void) => (
+    <button
+      key={key}
+      className="grid-insert"
+      style={{ left: x, top: y }}
+      title={title}
+      aria-label={title}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => {
+        setHover(null);
+        onClick();
+      }}
+    >
+      <Icon name="plus" size={12} />
+    </button>
+  );
+
+  let insertButtons: JSX.Element[] = [];
+  const box = containerRef.current?.getBoundingClientRect();
+  const bounds = hover && (hover.kind === "row" ? gridRef.current?.getBounds(-1, hover.index) : gridRef.current?.getBounds(hover.index, -1));
+  if (hover && box && bounds) {
+    const rect = { ...bounds, x: bounds.x - box.left, y: bounds.y - box.top };
+    const { index } = hover;
+    if (hover.kind === "row") {
+      const x = rect.x + rect.width / 2;
+      insertButtons = [
+        insertButton("above", x, rect.y, "上に行を挿入", () => props.onInsertRow(index, false)),
+        insertButton("below", x, rect.y + rect.height, "下に行を挿入", () => props.onInsertRow(index, true)),
+      ];
+    } else {
+      const y = rect.y + rect.height / 2;
+      insertButtons = [
+        insertButton("left", rect.x, y, "左に列を挿入", () => props.onInsertColumn(index)),
+        insertButton("right", rect.x + rect.width, y, "右に列を挿入", () => props.onInsertColumn(index + 1)),
+      ];
+    }
+  }
+
   return (
-    <div className="grid-container" ref={containerRef}>
-      <DataEditor
+    <div className="grid-container" ref={containerRef} onPointerMove={onPointerMove} onPointerLeave={() => hideHover()}>
+      <DataEditorCore
         ref={gridRef}
+        renderers={cellRenderers}
+        headerIcons={sprites}
+        imageWindowLoader={imageWindowLoader}
         columns={columns}
-        rows={rows.length}
+        rows={rowCount}
         getCellContent={getCellContent}
         customRenderers={renderers}
         rowHeight={rowHeight}
@@ -315,8 +413,14 @@ export function Grid(props: GridProps) {
         keybindings={{ copy: false, cut: false, paste: false, search: false }}
         getRowThemeOverride={getRowThemeOverride}
         highlightRegions={props.highlights}
-        trailingRowOptions={{ sticky: true, tint: true, targetColumn: hintColumn }}
-        onRowAppended={props.onAppendRow}
+        onVisibleRegionChanged={(range, tx, ty) => {
+          // Only scrolling moves items away from the pointer; row inserts also land here.
+          const v = visible.current;
+          const scrolled = range.x !== v.x || range.y !== v.y || tx !== scrollOffset.current[0] || ty !== scrollOffset.current[1];
+          visible.current = range;
+          scrollOffset.current = [tx ?? 0, ty ?? 0];
+          if (scrolled) setHover(null);
+        }}
         onRowMoved={props.canMoveRows ? props.onMoveRow : undefined}
         onColumnMoved={props.onMoveColumn}
         onColumnResize={(_c, size, index) => props.onColumnResize(index, size)}
@@ -340,6 +444,7 @@ export function Grid(props: GridProps) {
         minColumnWidth={48}
         maxColumnWidth={1200}
       />
+      {insertButtons}
     </div>
   );
 }

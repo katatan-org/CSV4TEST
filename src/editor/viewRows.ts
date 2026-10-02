@@ -1,4 +1,4 @@
-import { cellValue } from "../csv/document";
+import { cellValue, insertRecords, setCells, type CsvDoc } from "../csv/document";
 import type { CsvRecord } from "../csv/types";
 import { cellLines } from "../rules/tokens";
 
@@ -67,4 +67,32 @@ export function sortSnapshot(records: CsvRecord[], col: number, desc: boolean): 
     return (desc ? -c : c) || a.i - b.i;
   });
   return rows.map((r) => r.id);
+}
+
+export interface ViewCellEdit {
+  /** Row in the view; rows at or past `rows.length` are blank rows below the data. */
+  row: number;
+  col: number;
+  value: string;
+}
+
+// Clearing a blank row is not a reason to create it.
+const effective = (rowCount: number, edits: ViewCellEdit[]) => edits.filter((e) => e.row < rowCount || e.value !== "");
+
+/** How many records `editViewCells` appends for these edits. */
+export function rowsAddedBy(rowCount: number, edits: ViewCellEdit[]): number {
+  return effective(rowCount, edits).reduce((n, e) => Math.max(n, e.row - rowCount + 1), 0);
+}
+
+/**
+ * Applies edits addressed by view row. Editing below the last row appends records
+ * up to that row; the ones in between are saved as empty records (delimiters only).
+ */
+export function editViewCells(doc: CsvDoc, rows: CsvRecord[], edits: ViewCellEdit[]): CsvDoc {
+  const live = effective(rows.length, edits);
+  if (live.length === 0) return doc;
+  const blank = Array.from({ length: rowsAddedBy(rows.length, live) }, () => []);
+  const { doc: extended, ids } = insertRecords(doc, doc.records.length, blank);
+  const idOf = (row: number) => (row < rows.length ? rows[row].id : ids[row - rows.length]);
+  return setCells(extended, live.map((e) => ({ recordId: idOf(e.row), col: e.col, value: e.value })));
 }

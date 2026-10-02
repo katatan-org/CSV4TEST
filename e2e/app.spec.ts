@@ -10,6 +10,7 @@ interface Hook {
   getBounds(col: number, row: number): { x: number; y: number; width: number; height: number } | undefined;
   text(): string[][];
   selected(): [number, number] | undefined;
+  selectedRows(): number[];
 }
 
 /** Puts the sample at repo/tests/cases.csv in the origin-private file system and opens repo/. */
@@ -201,4 +202,82 @@ test("case-N references jump, filters and validation", async ({ page }) => {
   await page.getByRole("textbox", { name: "行を絞り込み" }).fill("delete");
   await expect(page.locator(".filter-bar")).toHaveCount(0);
   await expect(page.locator(".status-bar")).toContainText("3 / 9 行");
+});
+
+test("typing below the last row adds rows; hover buttons insert rows and columns", async ({ page }) => {
+  await openRepo(page);
+  const before = await cells(page);
+  const dataRows = before.length - 1;
+  const width = before[0].length;
+
+  // Two rows below the data: the gap is saved as an empty record.
+  await clickCell(page, 1, dataRows + 1);
+  await page.keyboard.press("Enter");
+  const editor = page.locator(".cell-editor textarea");
+  await editor.fill("Free input");
+  await editor.press("Enter");
+  await expect.poll(async () => (await cells(page)).length).toBe(before.length + 2);
+  let now = await cells(page);
+  expect(now[now.length - 2]).toEqual(Array(width).fill(""));
+  expect(now[now.length - 1][1]).toBe("Free input");
+
+  // Row number hover: insert above the first data row.
+  await page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.scrollTo(0, 0));
+  await page.waitForTimeout(100);
+  const marker = await page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.getBounds(-1, 0));
+  await page.mouse.move(marker!.x + marker!.width / 2, marker!.y + marker!.height / 2, { steps: 3 });
+  await page.getByRole("button", { name: "上に行を挿入" }).click();
+  now = await cells(page);
+  expect(now[1]).not.toEqual(before[1]);
+  expect(now[2]).toEqual(before[1]);
+
+  // Header hover: insert a column to the right of column 1.
+  const header = await page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.getBounds(1, -1));
+  await page.mouse.move(header!.x + header!.width / 2, header!.y + header!.height / 2, { steps: 3 });
+  await page.getByRole("button", { name: "右に列を挿入" }).click();
+  await page.locator("form input").fill("Extra");
+  await page.locator("form input").press("Enter");
+  now = await cells(page);
+  expect(now[0][2]).toBe("Extra");
+  expect(now[0]).toHaveLength(width + 1);
+});
+
+test("insert buttons come back after leaving a button or clicking it", async ({ page }) => {
+  await openRepo(page);
+  const marker = (await page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.getBounds(-1, 1)))!;
+  const cx = marker.x + marker.width / 2;
+  const cy = marker.y + marker.height / 2;
+  await page.mouse.move(cx, cy, { steps: 3 });
+  const below = page.getByRole("button", { name: "下に行を挿入" });
+  await below.hover();
+  // Back into the same row number cell without clicking.
+  await page.mouse.move(cx, cy, { steps: 5 });
+  await page.waitForTimeout(400);
+  await expect(below).toBeVisible();
+
+  const before = (await cells(page)).length;
+  await below.click();
+  await expect.poll(async () => (await cells(page)).length).toBe(before + 1);
+  await page.mouse.move(cx, cy - 4, { steps: 5 });
+  await expect(below).toBeVisible();
+});
+
+test("the whole row number cell selects the row, and rows can still be dragged", async ({ page }) => {
+  await openRepo(page);
+  const marker = (await page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.getBounds(-1, 1)))!;
+  expect(marker.height).toBeGreaterThan(60);
+  // Far from the number, near the top-left corner.
+  await page.mouse.click(marker.x + 6, marker.y + 8);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.selectedRows())).toEqual([1]);
+  await page.mouse.click(marker.x + marker.width - 6, marker.y + marker.height - 8);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.selectedRows())).toEqual([]);
+
+  const before = await cells(page);
+  const target = (await page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.getBounds(-1, 3)))!;
+  await page.mouse.move(marker.x + 24, marker.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(target.x + 24, target.y + target.height / 2, { steps: 10 });
+  await page.mouse.up();
+  await expect.poll(async () => (await cells(page))[2][0]).not.toBe(before[2][0]);
+  expect(await page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.selectedRows())).toEqual([3]);
 });

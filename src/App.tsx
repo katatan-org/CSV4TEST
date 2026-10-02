@@ -40,7 +40,7 @@ import { assetsDirFor, ImageStore } from "./fs/imageStore";
 import { analyze, nextId, referencedImages, type Issue } from "./rules/analysis";
 import { findColumn, headersOf, parseRuleOverride, resolveRules, type RuleOverride } from "./rules/detect";
 import { cellLines } from "./rules/tokens";
-import { HelpDialog, Lightbox, PromptDialog, type PromptRequest } from "./ui/Dialogs";
+import { GuideDialog, Lightbox, ShortcutsDialog, PromptDialog, type PromptRequest } from "./ui/Dialogs";
 import { FileTree } from "./ui/FileTree";
 import { FindBar } from "./ui/FindBar";
 import { emptySelection, Grid, selectionRect } from "./ui/Grid";
@@ -119,7 +119,7 @@ export function App() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [prompt, setPrompt] = useState<PromptRequest | null>(null);
-  const [help, setHelp] = useState(false);
+  const [help, setHelp] = useState<"shortcuts" | "guide" | null>(null);
   const [lightbox, setLightbox] = useState<{ paths: string[]; index: number } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [externalChange, setExternalChange] = useState(false);
@@ -317,8 +317,6 @@ export function App() {
     [apply, prepareNewRows],
   );
 
-  const appendRow = useCallback(() => insertRowsAt(null, true), [insertRowsAt]);
-
   const duplicateRows = useCallback(
     (ids: number[]) => {
       if (ids.length === 0) return;
@@ -351,6 +349,8 @@ export function App() {
       const record = rows[from];
       if (!record || filtered || view.sortOrder) return;
       apply("行を移動", (d) => moveRecords(d, [record.id], to + 1));
+      // Glide leaves the row number it was dragged from selected; follow the moved row instead.
+      setSelection({ ...emptySelection, rows: CompactSelection.fromSingleSelection(to) });
     },
     [rows, filtered, view.sortOrder, apply],
   );
@@ -755,6 +755,7 @@ export function App() {
       scrollTo: (col: number, row: number) => gridRef.current?.scrollTo(col, row),
       text: () => stateRef.current.doc.records.map((r) => r.fields.map((f) => f.value)),
       selected: () => selection.current?.cell,
+      selectedRows: () => selection.rows.toArray(),
     };
   });
 
@@ -841,9 +842,12 @@ export function App() {
       } else if (mod && (e.key === "-" || e.code === "Minus")) {
         e.preventDefault();
         deleteRows(selectedRecordIds());
-      } else if (e.key === "?" || e.key === "F1") {
+      } else if (e.key === "?") {
         e.preventDefault();
-        setHelp(true);
+        setHelp("shortcuts");
+      } else if (e.key === "F1") {
+        e.preventDefault();
+        setHelp("guide");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -923,10 +927,6 @@ export function App() {
           <button className="icon-button" onClick={() => dispatch({ type: "redo" })} disabled={state.future.length === 0} title="やり直す (Ctrl+Y)" aria-label="やり直す">
             <Icon name="redo" />
           </button>
-          <button onClick={appendRow} disabled={!file} title="末尾に行を追加">
-            <Icon name="plus" />
-            <span className="label">行を追加</span>
-          </button>
           {missingOptional.map((name) => (
             <button key={name} onClick={() => addOptionalColumn(name)} disabled={!file} title={`KATATAN形式の ${name} 列を追加`}>
               <Icon name={name === "Images" ? "image" : "tag"} />
@@ -964,7 +964,10 @@ export function App() {
           <button className="icon-button" onClick={toggleMode} title="テーマ切り替え" aria-label="ライト/ダークを切り替え">
             <Icon name={mode === "dark" ? "sun" : "moon"} />
           </button>
-          <button className="icon-button" onClick={() => setHelp(true)} title="ショートカット (?)" aria-label="ヘルプ">
+          <button className="icon-button" onClick={() => setHelp("shortcuts")} title="キーボードショートカット (?)" aria-label="キーボードショートカット">
+            <Icon name="keyboard" />
+          </button>
+          <button className="icon-button" onClick={() => setHelp("guide")} title="ヘルプ (F1)" aria-label="ヘルプ">
             <Icon name="help" />
           </button>
         </div>
@@ -1052,10 +1055,14 @@ export function App() {
                   selection={selection}
                   onSelectionChange={setSelection}
                   canMoveRows={!filtered && !view.sortOrder}
+                  canExtend={!filtered}
                   highlights={highlights}
                   apply={apply}
-                  prepareNewRows={prepareNewRows}
-                  onAppendRow={appendRow}
+                  onInsertRow={(row, below) => {
+                    const record = rows[row];
+                    if (record) insertRowsAt(record.id, below);
+                  }}
+                  onInsertColumn={(at) => void addColumn(at)}
                   onMoveRow={moveRow}
                   onMoveColumn={(from, to) => apply("列を移動", (d) => moveColumn(d, from, to))}
                   onColumnResize={(col, w) => {
@@ -1146,7 +1153,8 @@ export function App() {
 
       {menu && <Menu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       {prompt && <PromptDialog request={prompt} onDone={() => setPrompt(null)} />}
-      {help && <HelpDialog onClose={() => setHelp(false)} />}
+      {help === "shortcuts" && <ShortcutsDialog onClose={() => setHelp(null)} />}
+      {help === "guide" && <GuideDialog onClose={() => setHelp(null)} />}
       {lightbox && (
         <Lightbox images={lightboxImages} index={lightbox.index} onIndex={(index) => setLightbox({ ...lightbox, index })} onClose={() => setLightbox(null)} />
       )}
