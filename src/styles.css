@@ -1255,3 +1255,46 @@ button.large small {
     white-space: nowrap;
   }
 }
+.guide-body .guide-matrix th,
+.guide-body .guide-matrix td {
+  width: auto;
+  white-space: normal;
+}
+.guide-body .guide-matrix thead th {
+  text-align: center;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.guide-body .guide-matrix thead small {
+  color: var(--text-muted);
+  font-weight: normal;
+}
+.guide-body .guide-matrix tbody th {
+  font-weight: normal;
+}
+.guide-body .guide-matrix td {
+  text-align: center;
+  white-space: nowrap;
+}
+.guide-body .guide-matrix td.yes,
+.guide-body .guide-matrix td.no {
+  font-size: 16px;
+  line-height: 1;
+}
+.guide-body .guide-matrix td.yes {
+  color: var(--ok);
+  font-weight: 700;
+}
+.guide-body .guide-matrix td.no {
+  color: var(--text-muted);
+}
+
+/* Shown but not usable in this browser; clicking explains why (unlike :disabled). */
+button.unavailable,
+button.unavailable:hover:not(:disabled) {
+  opacity: 0.45;
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
+  cursor: not-allowed;
+}

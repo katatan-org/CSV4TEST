@@ -200,16 +200,80 @@ const GUIDE: GuideSection[] = [
       <>
         <dl>
           <dt>フォルダを開く（Chrome / Edge）</dt>
-          <dd>リポジトリのフォルダを開き、左のツリーから CSV を選びます。Ctrl+S でそのファイルに上書き保存します。画像の追加もこの方法で開いたときだけ使えます。</dd>
+          <dd>リポジトリのフォルダを開き、左のツリーから CSV を選びます。Ctrl+S でそのファイルに上書き保存します。画像の表示・追加と .csvview.json は、この方法で開いたときだけ使えます。</dd>
           <dt>ファイル / ドラッグ＆ドロップ</dt>
-          <dd>CSV を1つだけ開きます。ブラウザが直接の書き込みに対応していない場合、保存はダウンロードになります。</dd>
+          <dd>CSV を1つだけ開きます。Firefox / Safari では保存がダウンロードになります（「ブラウザによる違い」を参照）。</dd>
           <dt>サンプル</dt>
           <dd>読み取り専用です。保存するとダウンロードになります。</dd>
         </dl>
         <p>
-          開いている間に <code>git pull</code> や <code>git checkout</code> でファイルが変わると、自動で読み込み直します。未保存の変更があるときは確認します。
+          開いている間に <code>git pull</code> や <code>git checkout</code> でファイルが変わると、自動で読み込み直します（Chrome / Edge のみ）。未保存の変更があるときは確認します。
         </p>
         <p>文字コード（UTF-8 / Shift_JIS）、BOM、改行コード（CRLF / LF、セル内改行も含む）、クォートの付け方、末尾改行の有無は、読み込んだときのまま保存します。</p>
+      </>
+    ),
+  },
+  {
+    id: "browsers",
+    title: "ブラウザによる違い",
+    body: (
+      <>
+        <p>
+          ファイルの上書き保存や画像の読み書きには、ブラウザがパソコン上のファイルを直接扱う機能（File System Access API）を使います。この機能に対応しているのは Chrome / Edge などの Chromium 系ブラウザだけです。Chromium 系でも、CSV
+          を1つだけ開いたときは CSV の隣のファイルを読めないため、使えない機能があります。
+        </p>
+        <table className="guide-matrix">
+          <thead>
+            <tr>
+              <th />
+              <th>
+                Chrome / Edge
+                <br />
+                <small>フォルダを開く</small>
+              </th>
+              <th>
+                Chrome / Edge
+                <br />
+                <small>ファイルを1つ開く</small>
+              </th>
+              <th>
+                Firefox / Safari
+                <br />
+                <small>ファイルを1つ開く</small>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {(
+              [
+                ["表示・編集・検証・差分の確認", "○", "○", "○"],
+                ["Ctrl+S での保存", "上書き", "上書き", "ダウンロード"],
+                ["外部の変更（git pull など）の自動再読み込み", "○", "○", "×"],
+                ["フォルダツリーから CSV を選ぶ", "○", "×", "×"],
+                ["相対パスの画像の表示", "○", "×", "×"],
+                ["画像の追加（貼り付け・ドロップ・ボタン）", "○", "×", "×"],
+                ["URL（https://…）の画像の表示", "○", "○", "○"],
+                [".csvview.json の読み込み", "○", "×", "×"],
+              ] as const
+            ).map(([feature, ...cells]) => (
+              <tr key={feature}>
+                <th>{feature}</th>
+                {cells.map((c, i) => (
+                  <td key={i} className={c === "×" ? "no" : c === "○" ? "yes" : undefined}>
+                    {c}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <ul>
+          <li>Chrome / Edge では、フォルダをウィンドウにドラッグ＆ドロップしても「フォルダを開く」と同じになります。</li>
+          <li>Chromium 系でも、Brave は初期設定でこの機能が無効です。</li>
+          <li>
+            この機能は <code>localhost</code> か https で開いたページでだけ使えます。社内サーバーなどに置くときは https で配信してください。
+          </li>
+        </ul>
       </>
     ),
   },
@@ -336,7 +400,7 @@ const GUIDE: GuideSection[] = [
             <tr>
               <th>Images（省略可）</th>
               <td>
-                CSV からの相対パスを1行に1つ書きます。「画像を追加」、ドラッグ＆ドロップ、スクリーンショットの貼り付けで <code>&lt;CSV名&gt;.assets/</code> に保存し、パスを追記します。
+                CSV からの相対パスを1行に1つ書きます。「画像を追加」、ドラッグ＆ドロップ、スクリーンショットの貼り付けで <code>&lt;CSV名&gt;.assets/</code> に保存し、パスを追記します（Chrome / Edge でフォルダを開いたときのみ）。
               </td>
             </tr>
           </tbody>

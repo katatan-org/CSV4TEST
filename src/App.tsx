@@ -623,6 +623,10 @@ export function App() {
   );
 
   const openFolder = useCallback(async () => {
+    if (!supportsFsAccess) {
+      toast(NO_FOLDER_SUPPORT);
+      return;
+    }
     try {
       await openFolderHandle(await pickFolder());
     } catch (e) {
@@ -822,6 +826,12 @@ export function App() {
         void (supportsFsAccess ? openFolder() : openSingleFile());
         return;
       }
+      // Help works before a file is open too.
+      if (!typing && (e.key === "?" || e.key === "F1")) {
+        e.preventDefault();
+        setHelp(e.key === "F1" ? "guide" : "shortcuts");
+        return;
+      }
       if (!file) return;
       if (mod && (key === "f" || key === "h")) {
         e.preventDefault();
@@ -842,12 +852,6 @@ export function App() {
       } else if (mod && (e.key === "-" || e.code === "Minus")) {
         e.preventDefault();
         deleteRows(selectedRecordIds());
-      } else if (e.key === "?") {
-        e.preventDefault();
-        setHelp("shortcuts");
-      } else if (e.key === "F1") {
-        e.preventDefault();
-        setHelp("guide");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -904,12 +908,15 @@ export function App() {
           <span>CSV4TEST</span>
         </div>
         <div className="toolbar-group">
-          {supportsFsAccess && (
-            <button onClick={() => void openFolder()} title="フォルダを開く (Ctrl+O)">
-              <Icon name="folder" />
-              <span className="label">フォルダを開く</span>
-            </button>
-          )}
+          <button
+            onClick={() => void openFolder()}
+            aria-disabled={!supportsFsAccess}
+            className={supportsFsAccess ? undefined : "unavailable"}
+            title={supportsFsAccess ? "フォルダを開く (Ctrl+O)" : NO_FOLDER_SUPPORT}
+          >
+            <Icon name="folder" />
+            <span className="label">フォルダを開く</span>
+          </button>
           <button onClick={() => void openSingleFile()} title="ファイルを開く">
             <Icon name="file" />
             <span className="label">ファイル</span>
@@ -1170,6 +1177,8 @@ export function App() {
   );
 }
 
+const NO_FOLDER_SUPPORT = "このブラウザではフォルダを開けません。Chrome / Edge で使えます（違いは F1 のヘルプ「ブラウザによる違い」を参照）";
+
 function Welcome({ onFolder, onFile, onSample }: { onFolder: () => void; onFile: () => void; onSample: () => void }) {
   return (
     <div className="welcome">
@@ -1178,15 +1187,18 @@ function Welcome({ onFolder, onFile, onSample }: { onFolder: () => void; onFile:
         CSVを開くと、列ごとのルールに沿って自動で整形して表示します。見た目の情報はCSVに書き込まないので、Gitの差分は編集した行だけになります。
       </p>
       <div className="welcome-actions">
-        {supportsFsAccess ? (
-          <button className="primary large" onClick={onFolder}>
-            <Icon name="folder" size={18} />
-            フォルダを開く
-            <small>Gitリポジトリのフォルダを開き、その場で保存します</small>
-          </button>
-        ) : (
-          <p className="note">このブラウザではフォルダを直接開けません。Chrome / Edge では、フォルダを開いてその場で保存できます。</p>
-        )}
+        <button
+          className={supportsFsAccess ? "primary large" : "large unavailable"}
+          onClick={onFolder}
+          aria-disabled={!supportsFsAccess}
+          title={supportsFsAccess ? undefined : NO_FOLDER_SUPPORT}
+        >
+          <Icon name="folder" size={18} />
+          フォルダを開く
+          <small>
+            {supportsFsAccess ? "Gitリポジトリのフォルダを開き、その場で保存します" : "このブラウザでは使えません（Chrome / Edge で使えます）"}
+          </small>
+        </button>
         <button className="large" onClick={onFile}>
           <Icon name="file" size={18} />
           ファイルを開く

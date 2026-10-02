@@ -281,3 +281,23 @@ test("the whole row number cell selects the row, and rows can still be dragged",
   await expect.poll(async () => (await cells(page))[2][0]).not.toBe(before[2][0]);
   expect(await page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.selectedRows())).toEqual([3]);
 });
+
+test("help opens from the start screen; folder button explains itself where unsupported", async ({ page }) => {
+  await page.addInitScript(() => {
+    delete (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker;
+  });
+  await page.goto("/");
+  await expect(page.locator(".welcome")).toBeVisible();
+  await page.waitForTimeout(100);
+  await page.keyboard.press("F1");
+  await expect(page.getByRole("dialog", { name: "ヘルプ" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("?");
+  await expect(page.getByRole("dialog", { name: "キーボードショートカット" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  const folder = page.locator(".welcome-actions button").first();
+  await expect(folder).toHaveAttribute("aria-disabled", "true");
+  await folder.click({ force: true });
+  await expect(page.locator(".toast")).toContainText("Chrome / Edge");
+});
