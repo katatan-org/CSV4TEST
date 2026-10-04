@@ -1,0 +1,11 @@
+/* Page-level styles for the standalone app only (the library does not load this file). */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.c4t-shell {
+  height: 100%;
+}
