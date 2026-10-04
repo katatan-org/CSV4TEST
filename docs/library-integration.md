@@ -35,116 +35,132 @@ KATATANの表エディタも CSV4TEST に統一すると決めたため、**KATA
 
 ## StorageBackend
 
+定義は `src/storage/types.ts`。パスは backend のルートからの `/` 区切りの相対パスで表す。
+
 ```ts
 export interface StorageBackend {
-  readonly capabilities: {
-    /** ファイルツリーを表示する（複数のファイルを扱う） */
-    tree: boolean;
-    /** 画像を追加できる */
-    images: boolean;
-    /** 保存時にメッセージを入力させる（Git） */
-    commitMessage: boolean;
-    /** 自動保存する（DB）。false なら Ctrl+S で明示的に保存する */
-    autosave: boolean;
-    /** 列の追加、削除、名前の変更を禁止する（DB） */
-    fixedColumns: boolean;
-    /** 指定した列を読み取り専用にする（例: DBの No） */
-    readOnlyColumns?: string[];
-    readOnly: boolean;
-  };
-
+  readonly capabilities: BackendCapabilities;
+  /** ルート配下の全ファイル（ディレクトリはパスから組み立てる）。tree が true のときに使う */
   listTree?(): Promise<TreeEntry[]>;
+  /** ファイルがなければ NotFoundError で reject する */
   read(path: string): Promise<{ bytes: Uint8Array; version: string }>;
   save(changeSet: ChangeSet): Promise<SaveResult>;
-  /** 画像のパスから、表示用のURLを返す（blob: か https:） */
-  assetUrl(path: string): Promise<string | null>;
-  /** 画像を受け取り、保存先のパスを返す（Images列に追記するパス） */
-  addAsset?(csvPath: string, file: Blob, hint: { caseNo: string }): Promise<string>;
-  /** `{{` の補完候補 */
-  variables?(): Promise<{ key: string; description?: string }[]>;
-  /** 外部で変更があったことを知らせる（git pull、push webhook など） */
-  onExternalChange?(cb: (paths: string[]) => void): () => void;
+  /** 画像の表示用URL（blob: か https:）。ファイルがなければ null */
+  assetUrl?(path: string): Promise<string | null>;
+  /** dir に baseName で始まる未使用の名前で画像を保存し、そのパスを返す */
+  addAsset?(dir: string, baseName: string, file: Blob & { name?: string }): Promise<string>;
+  /** `{{` の補完候補を追加する（Dictionary など） */
+  variables?(): Promise<{ name: string; description?: string }[]>;
+  /** 外部での変更を知らせる（git pull、push webhook など）。戻り値で購読を解除する */
+  onExternalChange?(listener: (paths: string[]) => void): () => void;
+  /** エディタがファイルを開いたとき・保存したときに呼ぶ。外部変更の監視対象にするため */
+  watch?(path: string, version: string): void;
+  /** タイマーや object URL を解放する */
+  dispose?(): void;
 }
 
-export interface TreeEntry { path: string; version: string; size: number; lfs?: boolean }
+export interface BackendCapabilities {
+  tree: boolean;            // ファイルツリーを表示する
+  images: boolean;          // 画像を追加できる（addAsset）
+  commitMessage: boolean;   // 保存時にメッセージを入力させる（Git）
+  autosave: boolean;        // 編集の2秒後に自動保存する（DB）。false なら Ctrl+S で保存する
+  fixedColumns: boolean;    // 列の追加・削除・名前の変更・移動を禁止する（DB）
+  readOnlyColumns: string[];// 編集を禁止する列の見出し（例: DBの No）
+  readOnly: boolean;        // すべて読み取り専用
+  download: boolean;        // 保存するとダウンロードになる（単体アプリのアップロード・サンプル）
+}
+
+export interface TreeEntry { path: string; version?: string; size?: number; lfs?: boolean }
 
 export interface ChangeSet {
-  message?: string;                       // commitMessage が true のとき
-  files: {
-    path: string;
-    op: "put" | "delete";
-    bytes?: Uint8Array;                   // put のとき。ロスレスに書き出したバイト列
-    baseVersion: string | null;           // 読み込んだときの version（新しいファイルなら null）
-  }[];
-  /** CSV1ファイル分の、行単位の変更（DBのbackendが使う） */
+  files: { path: string; op: "put" | "delete"; bytes?: Uint8Array; baseVersion: string | null }[];
+  /** 同じ変更を行単位で表したもの（行を保存する backend 向け。見出し行は含まない） */
   records?: {
     path: string;
-    changes: RecordChange[];              // src/editor/changes.ts の型に、行の id を加えたもの
-    order: number[];                      // 今の並び順での、行の id の配列（並べ替えを伝えるため）
+    changes: RecordChange[]; // src/editor/changes.ts（record.id が編集中ずっと変わらない行のID）
+    order: number[];         // データ行の id を今の並び順で並べたもの（移動の再現に使う）
+    headers: string[];       // 今の列の並び
   };
+  message?: string;          // commitMessage が true のとき
+  force?: boolean;           // 競合のあとユーザーが「上書きして保存」を選んだとき
 }
 
 export type SaveResult =
-  | { ok: true; versions: Record<string, string>; recordIds?: Record<number, string> }
-  | { ok: false; conflict: { paths?: string[]; records?: { id: number; current: Record<string, string> }[] } }
+  | { ok: true; versions: Record<string, string>; assigned?: Record<number, Record<string, string>>; message?: string }
+  | { ok: false; conflict: { paths?: string[]; records?: { id: number; current?: Record<string, string> }[]; message?: string } }
   | { ok: false; error: { code: string; message: string; status?: number } };
 ```
 
-- `version` の中身は、backendによって違う。`FsAccessBackend` では `lastModified`、`GitSpecBackend` では blob SHA、`DbSpecBackend` では `updatedAt` を元にした値を入れる。CSV4TEST側は、この値の意味を解釈しない。
-- `save` で `conflict` が返ってきたら、競合したファイルや行を差分の表示で示し、ユーザーに「再読み込み」か「上書き」かを選ばせる。
-  - 上書きを選んだときは、新しい `baseVersion` で `save` を呼び直す。
-- `recordIds` は、DBのbackendが新しく作った行に割り当てたID（No）を返すためのもの。CSV4TESTは、受け取ったIDを No 列に反映する。
+- `version` の中身は backend ごとに違う（`FsAccessBackend` は `lastModified`、Git は blob SHA、DB は `updatedAt` など）。エディタは意味を解釈せず、`baseVersion` として返すだけ。`TreeEntry.version` は省略してよい（`read` が必ず返すため）。
+- `save` が `conflict` を返すと、エディタは「保存できませんでした」のバナーを出し、「最新を読み込む（変更を破棄）」か「上書きして保存」を選ばせる。上書きを選ぶと `force: true` で `save` を呼び直す。
+- `assigned` は、backend が保存時に値を決めた列を返すためのもの（例: DBが新しい行に採番した No）。キーは行の id と列の見出し。エディタはこの値を、未保存の変更にならない形で反映する。
+- 保存中に続けて編集した内容は、保存済みにならない（保存を始めた時点のスナップショットだけを保存済みとして扱う）。自動保存で入力が途切れないようにするため。
+- `addAsset` の保存のタイミング（すぐ書き込む、すぐアップロードする、次のcommitに含める）は backend が決める。
 
-### 用意する実装
+### 実装
 
 | 実装 | 置き場所 | 用途 |
 | --- | --- | --- |
-| `FsAccessBackend` | CSV4TEST `src/fs/` | 単体アプリ（File System Access API。今の `fileAccess.ts` と `imageStore.ts` を移す） |
-| `MemoryBackend` | CSV4TEST `src/fs/` | テスト用と、サンプルの表示用 |
-| `DbSpecBackend` | KATATAN `frontend` | KATATANのDB管理モード |
-| `GitSpecBackend` | KATATAN `frontend` | KATATANのGit管理モード（R-API1〜4） |
+| `FsAccessBackend` | CSV4TEST `src/storage/fsAccess.ts` | 単体アプリでフォルダを開く（File System Access API）。外部変更は2秒ごとに更新時刻を確認する |
+| `FsFileBackend` | 同上 | 単体アプリでファイルを1つ開く（画像と `.csvview.json` は使えない） |
+| `MemoryBackend` | CSV4TEST `src/storage/memory.ts` | サンプル、アップロードしたファイル（保存はダウンロード）、テスト |
+| `DbSpecBackend` | KATATAN `frontend` | KATATANのDB管理モード（katatan-org/katatan-TEST#432） |
+| `GitSpecBackend` | KATATAN `frontend` | KATATANのGit管理モード（katatan-org/katatan-TEST#434） |
 
 ## mount API
 
 ```ts
-import { mount } from "@katatan/csv4test";
+import { mount, type StorageBackend } from "@katatan/csv4test";
 
 const editor = mount(container, {
-  backend,
-  file: "tests/login.csv",        // 省略時、tree が true ならツリーだけ表示する
+  backend,                         // StorageBackend
+  file: "tests/login.csv",         // 省略すると、tree が true ならツリーだけ表示する
+  rootName: "login-tests",         // ツリーの見出し（省略時「ファイル」）
   readOnly: false,
-  theme: { /* CSS変数の上書き */ },
-  locale: "ja",
-  messages: { /* 文言の上書き */ },
+  theme: "light",                  // "light" | "dark"
+  themeVars: { "--accent": "#0f766e", "--font": "..." },
   onDirtyChange(dirty) {},
+  onFileChange(path) {},
   onSaved(result) {},
   onError(error) {},
 });
 
 editor.isDirty();
-await editor.save();
+await editor.save();               // 保存されなかったら false（キャンセル、競合、エラー）
+await editor.open("tests/other.csv");
+editor.currentPath();
+editor.update({ theme: "dark" });  // あとから設定を変える（backend を渡し直すと読み込み直す）
 editor.unmount();
 ```
 
+`container` には高さを指定しておくこと（エディタはその高さいっぱいに広がる）。CSSは初回の `mount` で `<style id="csv4test-styles">` として自動で差し込まれるので、組み込み先でCSSファイルを読み込む必要はない。
+
 ## 組み込み時の制約
 
-- **キーボードショートカット**: `container` の中にフォーカスがあるときだけ効く。`window` には登録しない。F1、?、Ctrl+S、Ctrl+F も同じ。
-- **グローバルな状態**: `document.title`、`body` のスタイル、`localStorage` のキーを書き換えない。`localStorage` を使う場合は、キーの先頭に `csv4test:` を付ける。
-- **テーマ**: `src/ui/theme.ts` の色を、CSS変数（`--c4t-*`）から読むようにする。組み込み先は、自分のデザイントークンを `theme` で渡す。Canvasの描画も、このCSS変数の値を使う。
-- **文言**: UIの文字列は、`messages` で上書きできるようにする。既定は今の日本語。
-- **単体アプリ専用のUI**: 「フォルダを開く」「ファイル」「ダウンロード」、ドラッグ＆ドロップでファイルを開く機能は、`capabilities` と `tree` の設定に応じて隠す。
-- **ヘッダーの領域**: 組み込み先が自分のヘッダー（ブランチ、PR、保存状態など）を持つので、CSV4TESTのツールバーは、編集の操作に限る。
+- **キーボードショートカット**: エディタの中にフォーカスがあるときだけ効く（`window` には登録しない）。Ctrl+S、Ctrl+F、Ctrl+Z、F1、? も同じ。
+- **CSS**: すべてのルールを `.c4t` の配下に限定している。組み込み先のページのスタイルは変えない。`html`、`body` のルールは単体アプリ用の `app.css` に分けており、ライブラリには含まれない。
+- **ページ全体の状態**: `document.title` と `beforeunload` は触らない。未保存の確認は、`isDirty()` と `onDirtyChange` を使って組み込み先が行う。`localStorage` のキーは `csv4test:` で始まるものだけを使う（列の幅、サイドパネルの開閉）。
+- **セルのエディタ**: Glide Data Grid はセルを編集するときのエディタを `#portal` に描画する。なければエディタが `body` の末尾に作り、`.c4t` のスタイルとテーマを付ける。
+- **テーマ**: `theme` でライト／ダークを切り替える。`themeVars` で CSS 変数（`--bg`、`--text`、`--accent`、`--border`、`--font` など。一覧は `src/styles.css` の先頭）を上書きできる。グリッドは Canvas で描画するため、CSS 変数のうち `--accent` と `--font` だけをグリッドにも反映する。
+- **単体アプリ専用のUI**: 「フォルダを開く」「ファイル」、ようこそ画面、ウィンドウへのドラッグ＆ドロップ、テーマの切り替えボタン、Ctrl+O は単体アプリ（`src/App.tsx`）にだけある。
+- **未対応**: UIの文言の差し替え（`messages`）はまだできない（文言は日本語のみ）。同じページに2つのエディタを置くと、`#portal` のテーマは最後に描画したエディタのものになる。
 
 ## パッケージ
 
-- 名前は `@katatan/csv4test` とし、Viteのライブラリモードで ESM として出力する。
-- React、ReactDOM、Glide Data Grid は**同梱する**。組み込み先は React に依存しない。
-- 型定義（`d.ts`）を出力する。
-- 中核部分（`src/csv`、`src/rules`）は、`@katatan/csv4test/core` として、Reactを含まない形でも公開する。KATATANのサーバーがレポートを取り込むときに、CSV4TESTと同じパーサーを使うため。
-- KATATANのテストレポート用のプリセット `katatan-report` を追加する（結果の列 `Result, Tester, Executed At, Result Notes, Evidence` を、バッジと日時で表示する）。
+- 名前は `@katatan/csv4test`。`npm run build:lib` で `dist-lib/` に出力する（Vite のライブラリモード、ESM、型定義付き）。
+  - `@katatan/csv4test`: `mount` と backend（`MemoryBackend` など）、型
+  - `@katatan/csv4test/core`: パーサー、シリアライザー、ドキュメントモデル、変更の計算、表示ルール。React も DOM も使わないので、サーバーからも使える（KATATAN がレポート用に CSV を取り込むときなど）
+- React、ReactDOM、Glide Data Grid は同梱している。組み込み先は React に依存しない。
+- サイズ（gzip）: 本体のチャンクが約220kB。Shift_JIS で保存するときにだけ読み込む文字コード表が約85kB。組み込み先では、エディタを開く画面で動的に `import()` すること。
+- **未決**: 配布方法（npm に公開するか、GitHub リポジトリから直接依存させるか）。GitHub から直接依存させる場合は、インストール時にビルドが走るよう `prepare` スクリプトを足すか、ビルド済みの成果物を配布する必要がある（`dist-lib/` は Git に含めていない）。
+
+## 開発
+
+- `embed.html`（開発サーバー専用）は、React を使わないページから `mount()` で組み込むテスト用のホスト。`npm run dev` で `http://localhost:5173/embed.html` を開き、コンソールで `__embed.mount({ "a.csv": "No,Test Subject\n1,x\n" }, { tree: true })` のように試せる。
+- E2E テスト `e2e/embed.spec.ts` が、組み込み時の動作（backend 経由の保存、ショートカットの範囲、組み込み先のスタイル、読み取り専用の列、自動保存、コミットメッセージ、競合）を確認する。
 
 ## 検証
 
 - 単体アプリが、ライブラリの上に組み直した後も、今のE2Eテスト（`npm run e2e`）と単体テストをすべて通ること。
-- `MemoryBackend` を使って、`mount` → 編集 → `save` を行い、`ChangeSet` の `files[].bytes` が今のロスレス書き出しと一致し、`records` に行の追加・削除・変更・並び順が正しく入っていること。
-- 2つのエディタを同じページに `mount` しても、ショートカットとスタイルが互いに干渉しないこと。
+- `MemoryBackend` を使って、`mount` → 編集 → `save` を行い、`ChangeSet` の `files[].bytes` が今のロスレス書き出しと一致し、`records` に行の変更と並び順が正しく入っていること。
+- 組み込み先のページのスタイルが、`mount` の前後で変わらないこと。

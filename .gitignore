@@ -3,3 +3,4 @@ dist
 *.local
 e2e-results
 playwright-report
+dist-lib

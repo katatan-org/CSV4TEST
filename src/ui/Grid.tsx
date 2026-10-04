@@ -13,8 +13,8 @@ import {
   type GridSelection,
   type Item,
   type Rectangle,
+  type Theme,
 } from "@glideapps/glide-data-grid";
-import "@glideapps/glide-data-grid/dist/index.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { cellValue, columnCount, setCells, type CellEdit, type CsvDoc } from "../csv/document";
 import type { CsvRecord } from "../csv/types";
@@ -49,6 +49,8 @@ export interface GridProps {
   /** Columns can be inserted and moved. */
   canEditColumns: boolean;
   highlights: DataEditorProps["highlightRegions"];
+  /** Host overrides for the canvas theme (the canvas cannot read CSS variables). */
+  themeOverride?: Partial<Theme>;
   apply(label: string, update: (doc: CsvDoc) => CsvDoc): void;
   /** Inserts a blank row next to the record shown at view row `row`. */
   onInsertRow(row: number, below: boolean): void;
@@ -117,7 +119,7 @@ export function Grid(props: GridProps) {
 
   const renderers = useMemo(() => [createRichRenderer(viewRef)], []);
   const imageWindowLoader = useMemo(() => new ImageWindowLoaderImpl(), []);
-  const theme = useMemo(() => gridTheme(mode), [mode]);
+  const theme = useMemo(() => ({ ...gridTheme(mode), ...props.themeOverride }), [mode, props.themeOverride]);
   const colCount = rules.columns.length;
   const rowCount = rows.length + (props.canExtend ? BLANK_ROWS : 0);
 

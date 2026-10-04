@@ -1,5 +1,5 @@
-import { CompactSelection, type DataEditorRef, type GridSelection, type Rectangle } from "@glideapps/glide-data-grid";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { CompactSelection, type DataEditorRef, type GridSelection, type Rectangle, type Theme } from "@glideapps/glide-data-grid";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   cellValue,
   columnCount,
@@ -50,6 +50,11 @@ export interface EditorProps {
   /** Forces read-only, on top of the backend's capabilities. */
   readOnly?: boolean;
   theme: ThemeMode;
+  /**
+   * CSS variable overrides for the host's design tokens, e.g. { "--accent": "#0f766e", "--font": "..." }.
+   * `--accent` and `--font` also apply to the grid canvas.
+   */
+  themeVars?: Record<string, string>;
   /**
    * Embedded in another page: shortcuts only work while focus is inside the
    * editor, and nothing on the page (title, unload prompt) is touched.
@@ -165,6 +170,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   backendRef.current = backend;
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
+  const themeVarsRef = useRef(props.themeVars);
+  themeVarsRef.current = props.themeVars;
 
   const setFile = useCallback((update: OpenFile | null | ((f: OpenFile | null) => OpenFile | null)) => {
     const next = typeof update === "function" ? update(fileRef.current) : update;
@@ -896,7 +903,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     }
     portal.classList.add("c4t", "c4t-portal");
     portal.dataset.theme = mode;
-  }, [mode]);
+    for (const [k, v] of Object.entries(themeVarsRef.current ?? {})) portal.style.setProperty(k, v);
+  }, [mode, props.themeVars]);
 
   // Test seam for E2E (dev server only).
   useEffect(() => {
@@ -993,7 +1001,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   );
 
   const tree = useMemo(
-    () => (entries ? buildTree(props.rootName ?? "", entries.map((e) => e.path).filter(isCsvPath)) : null),
+    () => (entries ? buildTree(props.rootName || "ファイル", entries.map((e) => e.path).filter(isCsvPath)) : null),
     [entries, props.rootName],
   );
 
@@ -1004,302 +1012,316 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   ];
 
   const ui = uiColors(mode);
+  const themeVars = props.themeVars;
+  const canvasTheme = useMemo<Partial<Theme> | undefined>(() => {
+    if (!themeVars) return undefined;
+    const t: Partial<Theme> = {};
+    if (themeVars["--accent"]) {
+      t.accentColor = themeVars["--accent"];
+      t.bgBubbleSelected = themeVars["--accent"];
+    }
+    if (themeVars["--font"]) t.fontFamily = themeVars["--font"];
+    return t;
+  }, [themeVars]);
   const saveLabel = caps?.download ? "ダウンロード" : caps?.commitMessage ? "コミット" : "保存";
   const changeCount = changes.changes.length + (changes.reordered ? 1 : 0);
   const saveState = saving ? "保存中…" : conflict ? "競合あり" : dirty ? "未保存" : "保存済み";
 
   return (
-    <div className="c4t app" data-theme={mode} ref={rootRef} tabIndex={embedded ? -1 : undefined}>
-      <header className="toolbar">
-        {props.toolbarStart}
-        <div className="toolbar-group">
-          {caps?.autosave ? (
-            <span className={`save-state${dirty || conflict ? " pending" : ""}`} role="status">
-              {file ? saveState : ""}
-            </span>
-          ) : (
-            <button
-              className={dirty ? "primary" : undefined}
-              onClick={() => void save()}
-              disabled={!file || readOnly || saving}
-              title={`${saveLabel} (Ctrl+S)`}
-            >
-              <Icon name={caps?.download ? "download" : "save"} />
-              <span className="label">{saveLabel}</span>
-              {dirty && <span className="badge">{changeCount}</span>}
-            </button>
-          )}
-        </div>
-        <div className="toolbar-group">
-          <button className="icon-button" onClick={() => dispatch({ type: "undo" })} disabled={state.past.length === 0} title="元に戻す (Ctrl+Z)" aria-label="元に戻す">
-            <Icon name="undo" />
-          </button>
-          <button className="icon-button" onClick={() => dispatch({ type: "redo" })} disabled={state.future.length === 0} title="やり直す (Ctrl+Y)" aria-label="やり直す">
-            <Icon name="redo" />
-          </button>
-          {missingOptional.map((name) => (
-            <button key={name} onClick={() => addOptionalColumn(name)} disabled={!file} title={`KATATAN形式の ${name} 列を追加`}>
-              <Icon name={name === "Images" ? "image" : "tag"} />
-              <span className="label">{name}列を追加</span>
-            </button>
-          ))}
-        </div>
-        <div className="toolbar-search">
-          <Icon name="filter" size={14} />
-          <input
-            value={view.quick}
-            onChange={(e) => setView((v) => ({ ...v, quick: e.target.value }))}
-            placeholder="行を絞り込み…"
-            aria-label="行を絞り込み"
-            disabled={!file}
-          />
-          {view.quick && (
-            <button className="icon-button" onClick={() => setView((v) => ({ ...v, quick: "" }))} aria-label="絞り込みを解除">
-              <Icon name="x" size={12} />
-            </button>
-          )}
-        </div>
-        <div className="toolbar-group right">
-          <button className="icon-button" onClick={() => setFind({ open: true, replace: false })} disabled={!file} title="検索と置換 (Ctrl+F)" aria-label="検索と置換">
-            <Icon name="search" />
-          </button>
-          {tree && (
-            <button className={`icon-button${showTree ? " on" : ""}`} onClick={() => setShowTree(!showTree)} title="ファイル一覧" aria-label="ファイル一覧の表示切り替え" aria-pressed={showTree}>
-              <Icon name="tree" />
-            </button>
-          )}
-          <button className={`icon-button${panel ? " on" : ""}`} onClick={() => setPanel(panel ? null : "issues")} title="サイドパネル" aria-label="サイドパネルの表示切り替え" aria-pressed={!!panel}>
-            <Icon name="sidebar" />
-          </button>
-          {props.onToggleTheme && (
-            <button className="icon-button" onClick={props.onToggleTheme} title="テーマ切り替え" aria-label="ライト/ダークを切り替え">
-              <Icon name={mode === "dark" ? "sun" : "moon"} />
-            </button>
-          )}
-          <button className="icon-button" onClick={() => setHelp("shortcuts")} title="キーボードショートカット (?)" aria-label="キーボードショートカット">
-            <Icon name="keyboard" />
-          </button>
-          <button className="icon-button" onClick={() => setHelp("guide")} title="ヘルプ (F1)" aria-label="ヘルプ">
-            <Icon name="help" />
-          </button>
-        </div>
-      </header>
-
-      {conflict && (
-        <div className="banner warn" role="alert">
-          <Icon name="alert" />
-          <span>
-            保存できませんでした。{conflict.message ?? "ほかの人が先に変更しています。"}
-            {conflict.records && conflict.records.length > 0 && `（${conflict.records.map((r) => describeRecord(r.id)).join(", ")}）`}
-          </span>
-          <button onClick={() => window.confirm("自分の変更を破棄して、最新の内容を読み込みますか？") && void reload()}>最新を読み込む（変更を破棄）</button>
-          <button onClick={() => void save(true)}>上書きして保存</button>
-          <button onClick={() => setConflict(null)}>閉じる</button>
-        </div>
-      )}
-
-      {externalChange && !conflict && (
-        <div className="banner warn" role="alert">
-          <Icon name="alert" />
-          <span>ファイルが外部で変更されました（git pull / checkout など）。未保存の変更があります。</span>
-          <button onClick={() => window.confirm("未保存の変更を破棄して、最新の内容を読み込みますか？") && void reload()}>再読み込み（変更を破棄）</button>
-          <button onClick={() => setExternalChange(false)}>このまま編集を続ける</button>
-        </div>
-      )}
-
-      <div className="workspace">
-        {tree && showTree && (
-          <FileTree tree={tree} activePath={file?.path ?? null} dirty={dirty} onOpen={(p) => void openPath(p)} onRefresh={() => void refreshTree()} />
-        )}
-        <main className="main">
-          {file ? (
-            <>
-              {find.open && (
-                <FindBar
-                  rows={rows}
-                  colCount={rules.columns.length}
-                  headers={headers}
-                  replaceMode={find.replace && !readOnly}
-                  onReplaceMode={(replace) => setFind({ open: true, replace: replace && !readOnly })}
-                  onJump={(m) => jumpTo(m.recordId, m.col)}
-                  onReplace={(edits: CellEdit[], label) => apply(label, (d) => setCells(d, edits))}
-                  onMatches={setMatches}
-                  onClose={() => {
-                    setFind({ open: false, replace: false });
-                    gridRef.current?.focus();
-                  }}
-                />
-              )}
-              {activeFilters.length > 0 && (
-                <div className="filter-bar">
-                  <span>
-                    {rows.length} / {doc.records.length - 1} 行を表示
-                  </span>
-                  {activeFilters.map((f) => (
-                    <span key={f.key} className="filter-chip">
-                      {f.label}
-                      <button onClick={f.clear} aria-label={`${f.label} を解除`}>
-                        <Icon name="x" size={11} />
-                      </button>
-                    </span>
-                  ))}
-                  <button
-                    className="link"
-                    onClick={() => {
-                      setView(EMPTY_VIEW);
-                      setSortInfo(null);
-                    }}
-                  >
-                    すべて解除
-                  </button>
-                </div>
-              )}
-              {doc.records.length === 0 ? (
-                <div className="empty-file">
-                  <p>このファイルは空です。</p>
-                  {!readOnly && (
-                    <button
-                      onClick={() =>
-                        apply("ヘッダーを作成", (d) => {
-                          // KATATAN files use a BOM and CRLF records.
-                          const withLayout = { ...d, layout: { ...d.layout, bom: true, eol: "\r\n", trailingEol: true } };
-                          return insertRecords(withLayout, 0, [["No", "Test Subject", "Preconditions", "Steps", "Expected Result", "Notes"]]).doc;
-                        })
-                      }
-                    >
-                      KATATAN形式のヘッダーを作成
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <Grid
-                  doc={doc}
-                  rows={rows}
-                  rules={rules}
-                  view={viewCtx}
-                  widths={widths}
-                  mode={mode}
-                  selection={selection}
-                  onSelectionChange={setSelection}
-                  canMoveRows={!filtered && !view.sortOrder}
-                  canExtend={!filtered && !readOnly}
-                  readOnly={readOnly}
-                  readOnlyCols={readOnlyCols}
-                  canEditColumns={!fixedColumns}
-                  highlights={highlights}
-                  apply={apply}
-                  onInsertRow={(row, below) => {
-                    const record = rows[row];
-                    if (record) insertRowsAt(record.id, below);
-                  }}
-                  onInsertColumn={(at) => void addColumn(at)}
-                  onMoveRow={moveRow}
-                  onMoveColumn={(from, to) => apply("列を移動", (d) => moveColumn(d, from, to))}
-                  onColumnResize={(col, w) => {
-                    const header = rules.columns[col]?.header;
-                    if (header === undefined) return;
-                    setWidthsByHeader((prev) => {
-                      const next = { ...prev, [header]: Math.round(w) };
-                      if (widthKey) storageSet(widthKey, next);
-                      return next;
-                    });
-                  }}
-                  onHeaderMenu={openHeaderMenu}
-                  onCellMenu={openCellMenu}
-                  onImageFiles={(id, files) => void addImageFiles(id, files)}
-                  gridRef={gridRef}
-                />
-              )}
-            </>
-          ) : backend && tree ? (
-            <div className="welcome">
-              <p className="muted">左の一覧からCSVファイルを選んでください。</p>
-            </div>
-          ) : (
-            props.emptyState
-          )}
-        </main>
-        {file && panel && (
-          <SidePanel
-            tab={panel}
-            onTab={setPanel}
-            onClose={() => setPanel(null)}
-            issues={issues}
-            variables={analysis.variables}
-            labels={labelList}
-            activeLabels={view.labels}
-            onToggleLabel={(name) =>
-              setView((v) => ({
-                ...v,
-                labelCol: labelsCol?.index ?? null,
-                labels: v.labels.includes(name) ? v.labels.filter((l) => l !== name) : [...v.labels, name],
-              }))
-            }
-            changes={changes}
-            headers={headers}
-            canSave={!!file && !readOnly}
-            onSave={() => void save()}
-            onJump={jumpTo}
-            describeRecord={describeRecord}
-            onFilterText={(text) => setView((v) => ({ ...v, quick: text }))}
-            rules={rules}
-            presetChoice={presetChoice}
-            onPreset={setPresetChoice}
-            override={override}
-            missingOptional={missingOptional}
-            onAddOptional={addOptionalColumn}
-            hasLabels={!!labelsCol}
-            hasVariables={!!features.variables}
-          />
-        )}
-      </div>
-
-      <footer className="status-bar">
-        {file ? (
-          <>
-            <span className="path" title={file.path}>
-              {dirty && <span className="dirty-dot" aria-label="未保存" />}
-              {file.path}
-              {readOnly && <span className="tag">{lfs ? "Git LFS のため読み取り専用" : "読み取り専用"}</span>}
-              {!readOnly && caps?.download && <span className="tag">読み取り専用・保存はダウンロード</span>}
-              {!readOnly && caps?.autosave && <span className="tag">自動保存</span>}
-            </span>
-            <span>{rules.ruleSet.name === "katatan" ? "KATATAN" : "汎用CSV"}</span>
-            <span>
-              {filtered ? `${rows.length} / ` : ""}
-              {Math.max(0, doc.records.length - 1)} 行 × {rules.columns.length} 列
-            </span>
-            <span>{doc.encoding === "utf-8" ? `UTF-8${doc.layout.bom ? " (BOM)" : ""}` : "Shift_JIS"}</span>
-            <span>
-              {doc.layout.eol === "\r\n" ? "CRLF" : doc.layout.eol === "\r" ? "CR" : "LF"}
-              {doc.layout.cellEol !== doc.layout.eol ? ` / セル内 ${doc.layout.cellEol === "\r\n" ? "CRLF" : "LF"}` : ""}
-            </span>
-            {issues.length > 0 && (
-              <button className="status-issues" onClick={() => setPanel("issues")} style={{ color: ui.dirty }}>
-                <Icon name="alert" size={12} /> {issues.length}
+    <div className="c4t c4t-root" data-theme={mode} ref={rootRef} tabIndex={embedded ? -1 : undefined} style={themeVars as CSSProperties | undefined}>
+      <div className="app">
+        <header className="toolbar">
+          {props.toolbarStart}
+          <div className="toolbar-group">
+            {caps?.autosave ? (
+              <span className={`save-state${dirty || conflict ? " pending" : ""}`} role="status">
+                {file ? saveState : ""}
+              </span>
+            ) : (
+              <button
+                className={dirty ? "primary" : undefined}
+                onClick={() => void save()}
+                disabled={!file || readOnly || saving}
+                title={`${saveLabel} (Ctrl+S)`}
+              >
+                <Icon name={caps?.download ? "download" : "save"} />
+                <span className="label">{saveLabel}</span>
+                {dirty && <span className="badge">{changeCount}</span>}
               </button>
             )}
-            <span className="spacer" />
-            {state.lastAction && <span className="muted">{state.lastAction}</span>}
-          </>
-        ) : (
-          <span className="muted">見た目のルールはCSVに書き込まれません。保存時は編集した行だけが変わります。</span>
-        )}
-      </footer>
-
-      {menu && <Menu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
-      {prompt && <PromptDialog request={prompt} onDone={() => setPrompt(null)} />}
-      {help === "shortcuts" && <ShortcutsDialog onClose={() => setHelp(null)} />}
-      {help === "guide" && <GuideDialog onClose={() => setHelp(null)} />}
-      {lightbox && (
-        <Lightbox images={lightboxImages} index={lightbox.index} onIndex={(index) => setLightbox({ ...lightbox, index })} onClose={() => setLightbox(null)} />
-      )}
-      <div className="toasts" role="status" aria-live="polite">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.kind}`}>
-            {t.text}
           </div>
-        ))}
+          <div className="toolbar-group">
+            <button className="icon-button" onClick={() => dispatch({ type: "undo" })} disabled={state.past.length === 0} title="元に戻す (Ctrl+Z)" aria-label="元に戻す">
+              <Icon name="undo" />
+            </button>
+            <button className="icon-button" onClick={() => dispatch({ type: "redo" })} disabled={state.future.length === 0} title="やり直す (Ctrl+Y)" aria-label="やり直す">
+              <Icon name="redo" />
+            </button>
+            {missingOptional.map((name) => (
+              <button key={name} onClick={() => addOptionalColumn(name)} disabled={!file} title={`KATATAN形式の ${name} 列を追加`}>
+                <Icon name={name === "Images" ? "image" : "tag"} />
+                <span className="label">{name}列を追加</span>
+              </button>
+            ))}
+          </div>
+          <div className="toolbar-search">
+            <Icon name="filter" size={14} />
+            <input
+              value={view.quick}
+              onChange={(e) => setView((v) => ({ ...v, quick: e.target.value }))}
+              placeholder="行を絞り込み…"
+              aria-label="行を絞り込み"
+              disabled={!file}
+            />
+            {view.quick && (
+              <button className="icon-button" onClick={() => setView((v) => ({ ...v, quick: "" }))} aria-label="絞り込みを解除">
+                <Icon name="x" size={12} />
+              </button>
+            )}
+          </div>
+          <div className="toolbar-group right">
+            <button className="icon-button" onClick={() => setFind({ open: true, replace: false })} disabled={!file} title="検索と置換 (Ctrl+F)" aria-label="検索と置換">
+              <Icon name="search" />
+            </button>
+            {tree && (
+              <button className={`icon-button${showTree ? " on" : ""}`} onClick={() => setShowTree(!showTree)} title="ファイル一覧" aria-label="ファイル一覧の表示切り替え" aria-pressed={showTree}>
+                <Icon name="tree" />
+              </button>
+            )}
+            <button className={`icon-button${panel ? " on" : ""}`} onClick={() => setPanel(panel ? null : "issues")} title="サイドパネル" aria-label="サイドパネルの表示切り替え" aria-pressed={!!panel}>
+              <Icon name="sidebar" />
+            </button>
+            {props.onToggleTheme && (
+              <button className="icon-button" onClick={props.onToggleTheme} title="テーマ切り替え" aria-label="ライト/ダークを切り替え">
+                <Icon name={mode === "dark" ? "sun" : "moon"} />
+              </button>
+            )}
+            <button className="icon-button" onClick={() => setHelp("shortcuts")} title="キーボードショートカット (?)" aria-label="キーボードショートカット">
+              <Icon name="keyboard" />
+            </button>
+            <button className="icon-button" onClick={() => setHelp("guide")} title="ヘルプ (F1)" aria-label="ヘルプ">
+              <Icon name="help" />
+            </button>
+          </div>
+        </header>
+
+        {conflict && (
+          <div className="banner warn" role="alert">
+            <Icon name="alert" />
+            <span>
+              保存できませんでした。{conflict.message ?? "ほかの人が先に変更しています。"}
+              {conflict.records && conflict.records.length > 0 && `（${conflict.records.map((r) => describeRecord(r.id)).join(", ")}）`}
+            </span>
+            <button onClick={() => window.confirm("自分の変更を破棄して、最新の内容を読み込みますか？") && void reload()}>最新を読み込む（変更を破棄）</button>
+            <button onClick={() => void save(true)}>上書きして保存</button>
+            <button onClick={() => setConflict(null)}>閉じる</button>
+          </div>
+        )}
+
+        {externalChange && !conflict && (
+          <div className="banner warn" role="alert">
+            <Icon name="alert" />
+            <span>ファイルが外部で変更されました（git pull / checkout など）。未保存の変更があります。</span>
+            <button onClick={() => window.confirm("未保存の変更を破棄して、最新の内容を読み込みますか？") && void reload()}>再読み込み（変更を破棄）</button>
+            <button onClick={() => setExternalChange(false)}>このまま編集を続ける</button>
+          </div>
+        )}
+
+        <div className="workspace">
+          {tree && showTree && (
+            <FileTree tree={tree} activePath={file?.path ?? null} dirty={dirty} onOpen={(p) => void openPath(p)} onRefresh={() => void refreshTree()} />
+          )}
+          <main className="main">
+            {file ? (
+              <>
+                {find.open && (
+                  <FindBar
+                    rows={rows}
+                    colCount={rules.columns.length}
+                    headers={headers}
+                    replaceMode={find.replace && !readOnly}
+                    onReplaceMode={(replace) => setFind({ open: true, replace: replace && !readOnly })}
+                    onJump={(m) => jumpTo(m.recordId, m.col)}
+                    onReplace={(edits: CellEdit[], label) => apply(label, (d) => setCells(d, edits))}
+                    onMatches={setMatches}
+                    onClose={() => {
+                      setFind({ open: false, replace: false });
+                      gridRef.current?.focus();
+                    }}
+                  />
+                )}
+                {activeFilters.length > 0 && (
+                  <div className="filter-bar">
+                    <span>
+                      {rows.length} / {doc.records.length - 1} 行を表示
+                    </span>
+                    {activeFilters.map((f) => (
+                      <span key={f.key} className="filter-chip">
+                        {f.label}
+                        <button onClick={f.clear} aria-label={`${f.label} を解除`}>
+                          <Icon name="x" size={11} />
+                        </button>
+                      </span>
+                    ))}
+                    <button
+                      className="link"
+                      onClick={() => {
+                        setView(EMPTY_VIEW);
+                        setSortInfo(null);
+                      }}
+                    >
+                      すべて解除
+                    </button>
+                  </div>
+                )}
+                {doc.records.length === 0 ? (
+                  <div className="empty-file">
+                    <p>このファイルは空です。</p>
+                    {!readOnly && (
+                      <button
+                        onClick={() =>
+                          apply("ヘッダーを作成", (d) => {
+                            // KATATAN files use a BOM and CRLF records.
+                            const withLayout = { ...d, layout: { ...d.layout, bom: true, eol: "\r\n", trailingEol: true } };
+                            return insertRecords(withLayout, 0, [["No", "Test Subject", "Preconditions", "Steps", "Expected Result", "Notes"]]).doc;
+                          })
+                        }
+                      >
+                        KATATAN形式のヘッダーを作成
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <Grid
+                    doc={doc}
+                    rows={rows}
+                    rules={rules}
+                    view={viewCtx}
+                    widths={widths}
+                    mode={mode}
+                    selection={selection}
+                    onSelectionChange={setSelection}
+                    canMoveRows={!filtered && !view.sortOrder}
+                    canExtend={!filtered && !readOnly}
+                    readOnly={readOnly}
+                    readOnlyCols={readOnlyCols}
+                    canEditColumns={!fixedColumns}
+                    highlights={highlights}
+                    themeOverride={canvasTheme}
+                    apply={apply}
+                    onInsertRow={(row, below) => {
+                      const record = rows[row];
+                      if (record) insertRowsAt(record.id, below);
+                    }}
+                    onInsertColumn={(at) => void addColumn(at)}
+                    onMoveRow={moveRow}
+                    onMoveColumn={(from, to) => apply("列を移動", (d) => moveColumn(d, from, to))}
+                    onColumnResize={(col, w) => {
+                      const header = rules.columns[col]?.header;
+                      if (header === undefined) return;
+                      setWidthsByHeader((prev) => {
+                        const next = { ...prev, [header]: Math.round(w) };
+                        if (widthKey) storageSet(widthKey, next);
+                        return next;
+                      });
+                    }}
+                    onHeaderMenu={openHeaderMenu}
+                    onCellMenu={openCellMenu}
+                    onImageFiles={(id, files) => void addImageFiles(id, files)}
+                    gridRef={gridRef}
+                  />
+                )}
+              </>
+            ) : backend && tree ? (
+              <div className="welcome">
+                <p className="muted">左の一覧からCSVファイルを選んでください。</p>
+              </div>
+            ) : (
+              props.emptyState
+            )}
+          </main>
+          {file && panel && (
+            <SidePanel
+              tab={panel}
+              onTab={setPanel}
+              onClose={() => setPanel(null)}
+              issues={issues}
+              variables={analysis.variables}
+              labels={labelList}
+              activeLabels={view.labels}
+              onToggleLabel={(name) =>
+                setView((v) => ({
+                  ...v,
+                  labelCol: labelsCol?.index ?? null,
+                  labels: v.labels.includes(name) ? v.labels.filter((l) => l !== name) : [...v.labels, name],
+                }))
+              }
+              changes={changes}
+              headers={headers}
+              canSave={!!file && !readOnly}
+              onSave={() => void save()}
+              onJump={jumpTo}
+              describeRecord={describeRecord}
+              onFilterText={(text) => setView((v) => ({ ...v, quick: text }))}
+              rules={rules}
+              presetChoice={presetChoice}
+              onPreset={setPresetChoice}
+              override={override}
+              missingOptional={missingOptional}
+              onAddOptional={addOptionalColumn}
+              hasLabels={!!labelsCol}
+              hasVariables={!!features.variables}
+            />
+          )}
+        </div>
+
+        <footer className="status-bar">
+          {file ? (
+            <>
+              <span className="path" title={file.path}>
+                {dirty && <span className="dirty-dot" aria-label="未保存" />}
+                {file.path}
+                {readOnly && <span className="tag">{lfs ? "Git LFS のため読み取り専用" : "読み取り専用"}</span>}
+                {!readOnly && caps?.download && <span className="tag">読み取り専用・保存はダウンロード</span>}
+                {!readOnly && caps?.autosave && <span className="tag">自動保存</span>}
+              </span>
+              <span>{rules.ruleSet.name === "katatan" ? "KATATAN" : "汎用CSV"}</span>
+              <span>
+                {filtered ? `${rows.length} / ` : ""}
+                {Math.max(0, doc.records.length - 1)} 行 × {rules.columns.length} 列
+              </span>
+              <span>{doc.encoding === "utf-8" ? `UTF-8${doc.layout.bom ? " (BOM)" : ""}` : "Shift_JIS"}</span>
+              <span>
+                {doc.layout.eol === "\r\n" ? "CRLF" : doc.layout.eol === "\r" ? "CR" : "LF"}
+                {doc.layout.cellEol !== doc.layout.eol ? ` / セル内 ${doc.layout.cellEol === "\r\n" ? "CRLF" : "LF"}` : ""}
+              </span>
+              {issues.length > 0 && (
+                <button className="status-issues" onClick={() => setPanel("issues")} style={{ color: ui.dirty }}>
+                  <Icon name="alert" size={12} /> {issues.length}
+                </button>
+              )}
+              <span className="spacer" />
+              {state.lastAction && <span className="muted">{state.lastAction}</span>}
+            </>
+          ) : (
+            <span className="muted">見た目のルールはCSVに書き込まれません。保存時は編集した行だけが変わります。</span>
+          )}
+        </footer>
+
+        {menu && <Menu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+        {prompt && <PromptDialog request={prompt} onDone={() => setPrompt(null)} />}
+        {help === "shortcuts" && <ShortcutsDialog onClose={() => setHelp(null)} />}
+        {help === "guide" && <GuideDialog onClose={() => setHelp(null)} />}
+        {lightbox && (
+          <Lightbox images={lightboxImages} index={lightbox.index} onIndex={(index) => setLightbox({ ...lightbox, index })} onClose={() => setLightbox(null)} />
+        )}
+        <div className="toasts" role="status" aria-live="polite">
+          {toasts.map((t) => (
+            <div key={t.id} className={`toast ${t.kind}`}>
+              {t.text}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
