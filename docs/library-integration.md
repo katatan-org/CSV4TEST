@@ -152,7 +152,13 @@ editor.unmount();
   - `@katatan/csv4test/core`: パーサー、シリアライザー、ドキュメントモデル、変更の計算、表示ルール。React も DOM も使わないので、サーバーからも使える（KATATAN がレポート用に CSV を取り込むときなど）
 - React、ReactDOM、Glide Data Grid は同梱している。組み込み先は React に依存しない。
 - サイズ（gzip）: 本体のチャンクが約220kB。Shift_JIS で保存するときにだけ読み込む文字コード表が約85kB。組み込み先では、エディタを開く画面で動的に `import()` すること。
-- **未決**: 配布方法（npm に公開するか、GitHub リポジトリから直接依存させるか）。GitHub から直接依存させる場合は、インストール時にビルドが走るよう `prepare` スクリプトを足すか、ビルド済みの成果物を配布する必要がある（`dist-lib/` は Git に含めていない）。
+- **配布方法**: GitHub リポジトリから直接インストールする（`@katatan/ui` と同じ方式）。npm には公開しない。
+  - 組み込み先の `package.json` に、タグでバージョンを固定して書く: `"@katatan/csv4test": "github:katatan-org/CSV4TEST#v0.2.0"`
+  - インストール時に `prepare`（`npm run build:lib`）が `dist-lib/` をビルドする。`dist-lib/` は Git に含めない。
+  - React、Glide Data Grid などはライブラリに同梱しているので、`devDependencies` に置いている。組み込み先の `node_modules` には `@katatan/csv4test` だけが入る。
+  - private リポジトリなので、組み込み先の CI ではこのリポジトリを読めるトークンが必要（KATATAN の CI は `GH_PAT` で `@katatan/ui` を取得しているのと同じ仕組みを使う）。
+  - npm 11 では、インストール時に「`prepare` が `allowScripts` で許可されていない」という警告が出る。`allowScripts` に許可を書いても警告は消えないが、ビルドは実行される（npm 11.19 で確認）。将来の npm がこのビルドを止めるようになった場合は、ビルド済みの成果物を GitHub のリリースに添付して、その URL から取り込む方式に切り替える。
+- **リリースの手順**: `main` にマージしたら `vX.Y.Z` のタグを付ける。組み込み先は、そのタグに書き換えて `npm install` する。
 
 ## 開発
 
