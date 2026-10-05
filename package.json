@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "e2e": "playwright test",
-    "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json"
+    "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
+    "prepare": "npm run build:lib"
   },
   "dependencies": {
     "@glideapps/glide-data-grid": "^6.0.3",
