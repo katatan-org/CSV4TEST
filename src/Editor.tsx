@@ -27,7 +27,7 @@ import { assetsDirFor, ImageStore } from "./fs/imageStore";
 import { analyze, nextId, referencedImages, type Issue } from "./rules/analysis";
 import { findColumn, headersOf, parseRuleOverride, resolveRules, type RuleOverride } from "./rules/detect";
 import { cellLines } from "./rules/tokens";
-import { NotFoundError, dirOf, joinPath, type SaveResult, type StorageBackend, type TreeEntry } from "./storage/types";
+import { NotFoundError, dirOf, joinPath, type SaveResult, type StorageBackend, type TreeEntry, type VariableDef } from "./storage/types";
 import { GuideDialog, Lightbox, PromptDialog, ShortcutsDialog, type PromptRequest } from "./ui/Dialogs";
 import { buildTree, FileTree, type TreeNode } from "./ui/FileTree";
 import { FindBar } from "./ui/FindBar";
@@ -159,7 +159,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   const [widthsByHeader, setWidthsByHeader] = useState<Record<string, number>>({});
   const [imageIssues, setImageIssues] = useState<Issue[]>([]);
   const [imageTick, setImageTick] = useState(0);
-  const [extraVariables, setExtraVariables] = useState<string[]>([]);
+  /** Variables from the backend; null when it has none (then any `{{name}}` is fine). */
+  const [backendVariables, setBackendVariables] = useState<VariableDef[] | null>(null);
   const gridRef = useRef<DataEditorRef>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const savingRef = useRef(false);
@@ -209,7 +210,17 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   );
   const features = rules.ruleSet.features ?? {};
   const headers = useMemo(() => headersOf(doc), [headerRecord, width]); // eslint-disable-line react-hooks/exhaustive-deps
-  const analysis = useMemo(() => analyze(doc, rules), [doc, rules]);
+  const knownVariables = useMemo(() => (backendVariables ? new Set(backendVariables.map((v) => v.name)) : undefined), [backendVariables]);
+  const variableValues = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const v of backendVariables ?? []) if (v.value !== undefined) map.set(v.name, v.value);
+    return map;
+  }, [backendVariables]);
+  const definedVariables = useMemo(
+    () => (backendVariables ? new Map(backendVariables.map((v) => [v.name, v.value])) : undefined),
+    [backendVariables],
+  );
+  const analysis = useMemo(() => analyze(doc, rules, { knownVariables }), [doc, rules, knownVariables]);
   const rows = useMemo(() => computeViewRows(doc.records, view), [doc.records, view]);
   const changes = useMemo(() => computeChanges(doc), [doc]);
   const columnMap = useMemo(() => columnMapping(doc), [doc]);
@@ -248,8 +259,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   const imagesWritable = !!imageStore?.writable && !readOnly;
 
   const layouts = useMemo(
-    () => new LayoutCache(rules.columns, features.caseRef?.pattern, imagesWritable),
-    [rules.columns, features.caseRef?.pattern, imagesWritable],
+    () => new LayoutCache(rules.columns, features.caseRef?.pattern, imagesWritable, features.variables ? variableValues : undefined),
+    [rules.columns, features.caseRef?.pattern, imagesWritable, features.variables, variableValues],
   );
 
   // Redraw image cells when thumbnails finish loading.
@@ -628,8 +639,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
 
   const variableNames = useMemo(() => {
     const names = analysis.variables.map((v) => v.name);
-    return [...names, ...extraVariables.filter((v) => !names.includes(v))];
-  }, [analysis.variables, extraVariables]);
+    return [...names, ...(backendVariables ?? []).map((v) => v.name).filter((v) => !names.includes(v))];
+  }, [analysis.variables, backendVariables]);
 
   const viewCtx: ViewContext = {
     mode,
@@ -652,6 +663,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       void pickImagesByInput().then((files) => {
         if (files.length > 0) void addImageFiles(recordId, files);
       }),
+    // Called while the canvas draws, so it sets the attribute directly instead of React state.
+    onHint: (text) => {
+      const el = rootRef.current?.querySelector<HTMLElement>(".grid-container");
+      if (el && el.title !== (text ?? "")) el.title = text ?? "";
+    },
   };
 
   // ---- Files --------------------------------------------------------------------------
@@ -739,7 +755,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     setFile(null);
     setEntries(null);
     setOverride({});
-    setExtraVariables([]);
+    setBackendVariables(null);
     if (!backend) return;
     let cancelled = false;
     void (async () => {
@@ -759,7 +775,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       else if (props.openFirst && list) toast("このフォルダにはCSVファイルがありません");
     })();
     void backend.variables?.().then(
-      (vars) => !cancelled && setExtraVariables(vars.map((v) => v.name)),
+      (vars) => !cancelled && setBackendVariables(vars),
       () => undefined,
     );
     const unsubscribe = backend.onExternalChange?.((paths) => {
@@ -1254,6 +1270,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
               onClose={() => setPanel(null)}
               issues={issues}
               variables={analysis.variables}
+              definedVariables={definedVariables}
               labels={labelList}
               activeLabels={view.labels}
               onToggleLabel={(name) =>

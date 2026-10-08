@@ -109,6 +109,14 @@ describe("analysis", () => {
     expect(messages).toEqual(["No 1 が重複しています", "case-42 は存在しません", "case-2 は存在しません", "{{ が閉じられていません"]);
   });
 
+  it("flags variables the backend does not define, only when it defines some", () => {
+    let doc = katatan();
+    doc = setCells(doc, [{ recordId: doc.records[1].id, col: 3, value: "Type {{ID}} then {{PW}}" }]);
+    const defined = new Set(["ID", ...analyze(doc, resolveRules(doc)).variables.map((v) => v.name).filter((n) => n !== "PW")]);
+    expect(analyze(doc, resolveRules(doc), { knownVariables: defined }).issues.map((i) => i.message)).toEqual(["{{PW}} は定義されていません"]);
+    expect(analyze(doc, resolveRules(doc)).issues).toEqual([]);
+  });
+
   it("collects labels", () => {
     let doc = insertColumn(katatan(), 1, "Labels");
     doc = setCells(doc, [

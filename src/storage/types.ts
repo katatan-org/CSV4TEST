@@ -91,6 +91,13 @@ export type SaveResult =
     }
   | { ok: false; error: { code: string; message: string; status?: number } };
 
+export interface VariableDef {
+  name: string;
+  /** Shown in place of `{{name}}` in the grid. */
+  value?: string;
+  description?: string;
+}
+
 export interface StorageBackend {
   readonly capabilities: BackendCapabilities;
   /** Every file under the root (directories are implied by paths). Needed when `tree` is on. */
@@ -106,8 +113,12 @@ export interface StorageBackend {
    * backend (written at once, uploaded at once, or staged for the next commit).
    */
   addAsset?(dir: string, baseName: string, file: Blob & { name?: string }): Promise<string>;
-  /** Extra `{{variable}}` completions, e.g. from a shared dictionary. */
-  variables?(): Promise<{ name: string; description?: string }[]>;
+  /**
+   * Known `{{variable}}`s, e.g. from a shared dictionary. They are offered as completions;
+   * a `value` is shown in place of `{{name}}` outside the cell editor. When this is
+   * provided, `{{name}}`s not in the list are reported as issues.
+   */
+  variables?(): Promise<VariableDef[]>;
   /** Reports paths changed outside the editor (git pull, another user). Returns an unsubscribe function. */
   onExternalChange?(listener: (paths: string[]) => void): () => void;
   /** Called when the editor opens a file, so the backend can watch it. */

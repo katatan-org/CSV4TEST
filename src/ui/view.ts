@@ -26,6 +26,8 @@ export interface ViewContext {
   onJump(ref: string): void;
   onOpenImage(recordId: number, path: string): void;
   onAddImage(recordId: number): void;
+  /** Shows a hover hint for the grid (e.g. `{{name}}` behind a value), or clears it. */
+  onHint(text: string | null): void;
 }
 
 let measureCtx: CanvasRenderingContext2D | null = null;
@@ -61,6 +63,7 @@ export class LayoutCache {
     private readonly columns: ResolvedColumn[],
     private readonly caseRef: string | undefined,
     private readonly canAddImages: boolean,
+    private readonly variableValues?: ReadonlyMap<string, string>,
   ) {}
 
   get(col: number, width: number, value: string): CellLayout | undefined {
@@ -69,7 +72,11 @@ export class LayoutCache {
     const key = `${col}\u0000${Math.round(width)}\u0000${value}`;
     let layout = this.map.get(key);
     if (!layout) {
-      layout = layoutCell(value, { column, width, caseRef: this.caseRef, canAddImages: this.canAddImages }, measureText);
+      layout = layoutCell(
+        value,
+        { column, width, caseRef: this.caseRef, canAddImages: this.canAddImages, variableValues: this.variableValues },
+        measureText,
+      );
       if (this.map.size > 100_000) this.map.clear();
       this.map.set(key, layout);
     }

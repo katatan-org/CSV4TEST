@@ -1,5 +1,5 @@
 import type { ColorToken, ResolvedColumn } from "../rules/schema";
-import { cellLines, tokenize } from "../rules/tokens";
+import { cellLines, tokenize, type Token } from "../rules/tokens";
 import { layoutText, type Layout, type Measure, type Paragraph, type TextStyle } from "./richtext";
 import { FONT_MONO, FONT_SANS } from "./theme";
 
@@ -40,6 +40,8 @@ export interface LayoutOptions {
   column: ResolvedColumn;
   width: number;
   caseRef?: string;
+  /** Values shown in place of `{{name}}` chips. */
+  variableValues?: ReadonlyMap<string, string>;
   /** Images can only be added when the CSV's folder is writable. */
   canAddImages: boolean;
 }
@@ -66,13 +68,18 @@ export function layoutCell(value: string, opts: LayoutOptions, measure: Measure)
     return { kind: "images", thumbs, add, height };
   }
 
-  const paragraphs = toParagraphs(value, opts.column, opts.caseRef);
+  const paragraphs = toParagraphs(value, opts.column, opts.caseRef, opts.variableValues);
   const wrap = rule.wrap ?? false;
   const layout = layoutText(wrap ? paragraphs : paragraphs.slice(0, 1), wrap ? inner : Infinity, TEXT_STYLE, measure);
   return { kind: "text", layout, height: layout.height, center: rule.display === "id" };
 }
 
-function toParagraphs(value: string, column: ResolvedColumn, caseRef: string | undefined): Paragraph[] {
+function toParagraphs(
+  value: string,
+  column: ResolvedColumn,
+  caseRef: string | undefined,
+  variableValues: ReadonlyMap<string, string> | undefined,
+): Paragraph[] {
   const { rule } = column;
   const bold = rule.bold;
   if (value === "") {
@@ -81,16 +88,29 @@ function toParagraphs(value: string, column: ResolvedColumn, caseRef: string | u
   const shown = rule.format ? rule.format.replace(/\{value\}/g, value) : value;
   const lines = shown.split(/\r\n|\r|\n/);
   const tokens = rule.tokens ?? false;
+  const tokenizeLine = (line: string) => resolveVariables(tokenize(line, tokens, caseRef), variableValues);
 
   if (rule.display === "steps") {
     let n = 0;
     return lines.map((line) => ({
-      tokens: tokenize(line, tokens, caseRef),
+      tokens: tokenizeLine(line),
       prefix: line.trim() === "" ? undefined : `${++n}.`,
       bold,
     }));
   }
-  return lines.map((line) => ({ tokens: tokenize(line, tokens, caseRef), bold }));
+  return lines.map((line) => ({ tokens: tokenizeLine(line), bold }));
+}
+
+/**
+ * Shows a defined variable's value in its chip; `ref` keeps the name. An empty value
+ * would leave an empty chip, so `{{name}}` stays then.
+ */
+function resolveVariables(tokens: Token[], values: ReadonlyMap<string, string> | undefined): Token[] {
+  if (!values || values.size === 0) return tokens;
+  return tokens.map((t) => {
+    const value = t.kind === "var" && t.ref !== undefined ? values.get(t.ref) : undefined;
+    return value ? { ...t, text: value.replace(/\r\n|\r|\n/g, " ") } : t;
+  });
 }
 
 export function cellHeight(layout: CellLayout): number {

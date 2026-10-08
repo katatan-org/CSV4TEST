@@ -26,9 +26,10 @@
       window.__embed = {
         mount(files, capabilities, options = {}) {
           window.__embed.editor?.unmount();
-          const backend = new MemoryBackend({ files, capabilities });
+          const { variables, ...mountOptions } = options;
+          const backend = new MemoryBackend({ files, capabilities, variables });
           window.__embed.backend = backend;
-          window.__embed.editor = mount(document.getElementById("editor"), { backend, theme: "light", ...options });
+          window.__embed.editor = mount(document.getElementById("editor"), { backend, theme: "light", ...mountOptions });
         },
         saved() {
           return window.__embed.backend.saved.map((c) => ({

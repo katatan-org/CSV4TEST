@@ -188,3 +188,28 @@ test("host callbacks that return a value do not break the editor", async ({ page
   await editCell(page, 4, 7, "third");
   expect(errors).toEqual([]);
 });
+
+test("variables from the backend show their values, and undefined ones are reported", async ({ page }) => {
+  const names = [...SAMPLE.matchAll(/\{\{([^{}\n]*)\}\}/g)].map((m) => m[1].trim());
+  const variables = [{ name: "ID", value: "admin" }, ...names.map((name) => ({ name }))];
+  await mountEditor(page, {}, { variables });
+  await editCell(page, 3, 2, "Type {{ID}} then {{PW}}");
+
+  // Hovering the chip that shows "admin" hints the variable behind it.
+  const b = await page.evaluate(() => (window as unknown as { __csv4test: Hook }).__csv4test.getBounds(3, 2));
+  const grid = page.locator("#editor .grid-container");
+  let hint = "";
+  for (let x = b!.x + 8; x < b!.x + b!.width && hint === ""; x += 4) {
+    await page.mouse.move(x, b!.y + 18);
+    hint = (await grid.getAttribute("title")) ?? "";
+  }
+  expect(hint).toBe("{{ID}}");
+
+  const panel = page.locator("#editor .side-panel");
+  await page.getByRole("tab", { name: /検証/ }).click();
+  await expect(panel).toContainText("{{PW}} は定義されていません");
+  await expect(panel).not.toContainText("{{ID}} は定義されていません");
+  await page.getByRole("tab", { name: /変数/ }).click();
+  await expect(panel.locator(".var-list li", { hasText: "{{ID}}" })).toContainText("admin");
+  await expect(panel.locator(".var-list li", { hasText: "{{PW}}" })).toContainText("未定義");
+});

@@ -499,6 +499,15 @@
   color: var(--accent);
   word-break: break-all;
 }
+.c4t .var-list .var-value {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+.c4t .var-list .var-value.undefined {
+  color: var(--warn);
+}
 
 .c4t .changes-summary {
   display: flex;

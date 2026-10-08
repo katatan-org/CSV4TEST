@@ -12,6 +12,7 @@ import {
   type SaveResult,
   type StorageBackend,
   type TreeEntry,
+  type VariableDef,
 } from "./types";
 
 export interface MemoryBackendOptions {
@@ -19,6 +20,8 @@ export interface MemoryBackendOptions {
   capabilities?: Partial<BackendCapabilities>;
   /** Called after the files are updated, e.g. to download them. */
   onSave?: (changeSet: ChangeSet) => void | Promise<void>;
+  /** Defined `{{variable}}`s (left out: the backend has none). */
+  variables?: VariableDef[];
 }
 
 export class MemoryBackend implements StorageBackend {
@@ -27,12 +30,15 @@ export class MemoryBackend implements StorageBackend {
   private readonly urls = new Map<string, string>();
   private readonly listeners = new Set<(paths: string[]) => void>();
   private counter = 0;
+  readonly variables?: () => Promise<VariableDef[]>;
   /** Every change set saved so far, oldest first (handy in tests). */
   readonly saved: ChangeSet[] = [];
 
   constructor(private readonly options: MemoryBackendOptions = {}) {
     this.capabilities = makeCapabilities({ tree: true, images: true, ...options.capabilities });
     for (const [path, content] of Object.entries(options.files ?? {})) this.put(path, content);
+    const { variables } = options;
+    if (variables) this.variables = async () => variables;
   }
 
   private nextVersion(): string {

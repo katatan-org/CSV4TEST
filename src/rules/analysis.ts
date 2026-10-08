@@ -25,8 +25,14 @@ export interface Analysis {
   labels: string[];
 }
 
+export interface AnalyzeOptions {
+  /** Defined variable names (from the backend). When set, other `{{name}}`s are reported. */
+  knownVariables?: ReadonlySet<string>;
+}
+
 /** Content checks driven by the rule set's features. Pure and synchronous. */
-export function analyze(doc: CsvDoc, rules: ResolvedRules): Analysis {
+export function analyze(doc: CsvDoc, rules: ResolvedRules, options: AnalyzeOptions = {}): Analysis {
+  const { knownVariables } = options;
   const { features = {} } = rules.ruleSet;
   const rows = doc.records.slice(1);
   const issues: Issue[] = [];
@@ -74,6 +80,9 @@ export function analyze(doc: CsvDoc, rules: ResolvedRules): Analysis {
           issues.push({ severity: "warning", recordId: r.id, col: c.index, message: "{{ が閉じられていません" });
         }
         for (const name of variablesIn(v)) {
+          if (knownVariables && !knownVariables.has(name)) {
+            issues.push({ severity: "warning", recordId: r.id, col: c.index, message: `{{${name}}} は定義されていません` });
+          }
           const use = variables.get(name) ?? { name, count: 0, recordIds: [] };
           use.count++;
           if (use.recordIds[use.recordIds.length - 1] !== r.id) use.recordIds.push(r.id);

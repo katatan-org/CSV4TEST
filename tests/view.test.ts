@@ -79,6 +79,18 @@ describe("cell layout", () => {
     const prefixes = steps.kind === "text" ? steps.layout.lines.map((l) => l.runs.find((r) => r.kind === "prefix")?.text) : [];
     expect(prefixes).toEqual(["1.", undefined, "2."]);
   });
+
+  it("shows defined variable values in chips and keeps the name as ref", () => {
+    const variableValues = new Map([["ID", "admin"], ["EMPTY", ""], ["MULTI", "a\nb"]]);
+    const steps = layoutCell("Enter {{ID}} and {{PW}}\n{{EMPTY}} {{MULTI}}", { column: columns[4], width: 420, canAddImages: false, variableValues }, measure);
+    const chips = steps.kind === "text" ? steps.layout.lines.flatMap((l) => l.runs.filter((r) => r.kind === "var")) : [];
+    expect(chips.map((r) => [r.text, r.ref])).toEqual([
+      ["admin", "ID"],
+      ["{{PW}}", "PW"],
+      ["{{EMPTY}}", "EMPTY"],
+      ["a b", "MULTI"],
+    ]);
+  });
 });
 
 describe("changes", () => {

@@ -49,8 +49,12 @@ export interface StorageBackend {
   assetUrl?(path: string): Promise<string | null>;
   /** dir に baseName で始まる未使用の名前で画像を保存し、そのパスを返す */
   addAsset?(dir: string, baseName: string, file: Blob & { name?: string }): Promise<string>;
-  /** `{{` の補完候補を追加する（Dictionary など） */
-  variables?(): Promise<{ name: string; description?: string }[]>;
+  /**
+   * 定義済みの {{変数}}（Dictionary など）。`{{` の補完候補になる。
+   * value があれば、セルの表示（編集中以外）で {{name}} の代わりに値を表示し、ホバーで {{name}} を示す。
+   * 実装したときは、ここにない {{name}} を「定義されていません」と検証パネルに出す。
+   */
+  variables?(): Promise<{ name: string; value?: string; description?: string }[]>;
   /** 外部での変更を知らせる（git pull、push webhook など）。戻り値で購読を解除する */
   onExternalChange?(listener: (paths: string[]) => void): () => void;
   /** エディタがファイルを開いたとき・保存したときに呼ぶ。外部変更の監視対象にするため */
