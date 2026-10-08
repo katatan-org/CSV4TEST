@@ -889,9 +889,16 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     [openPath],
   );
 
-  useEffect(() => props.onDirtyChange?.(dirty), [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => props.onFileChange?.(file?.path ?? null), [file?.path]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => storageSet("csv4test:panel", panel), [panel]);
+  // コールバックの戻り値を cleanup として返さないよう、ブロックにする（Svelte の dispatch は boolean を返す）
+  useEffect(() => {
+    props.onDirtyChange?.(dirty);
+  }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    props.onFileChange?.(file?.path ?? null);
+  }, [file?.path]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    storageSet("csv4test:panel", panel);
+  }, [panel]);
 
   // Glide renders cell editors into #portal; make sure it exists and is styled like the editor.
   useEffect(() => {

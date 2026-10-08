@@ -164,3 +164,27 @@ test("a conflict offers reload or overwrite", async ({ page }) => {
   expect((await saved(page))[0].force).toBe(true);
   await expect(banner).toHaveCount(0);
 });
+
+test("host callbacks that return a value do not break the editor", async ({ page }) => {
+  // Svelte's dispatch returns a boolean; React must not take it as an effect cleanup.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/embed.html");
+  await page.waitForFunction(() => "__embed" in window);
+  await page.evaluate(
+    ([sample, path]) =>
+      (window as unknown as { __embed: Embed }).__embed.mount({ [path]: sample }, {}, {
+        file: path,
+        onDirtyChange: () => true,
+        onFileChange: () => true,
+      }),
+    [SAMPLE, PATH] as const,
+  );
+  await expect(page.locator("#editor .status-bar")).toContainText(PATH);
+  await editCell(page, 1, 2, "first");
+  await editCell(page, 2, 5, "second");
+  await page.keyboard.press("Control+s");
+  await expect.poll(async () => (await saved(page)).length).toBe(1);
+  await editCell(page, 4, 7, "third");
+  expect(errors).toEqual([]);
+});
