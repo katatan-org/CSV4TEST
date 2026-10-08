@@ -34,4 +34,5 @@ Click {{account_delete_button}}
 Enter 'demo@example.com' in {{dialog_confirm_input}}
 Click {{dialog_confirm_delete_button}}","Logged out, and logging in with 'demo@example.com' fails",,
 ,test,Test insert line,,,,,"KATATAN_CSV_FORMAT.assets/row-10.png
-KATATAN_CSV_FORMAT.assets/row-10.jpg"
+KATATAN_CSV_FORMAT.assets/row-10.jpg
+KATATAN_CSV_FORMAT.assets/row-10-2.png"
