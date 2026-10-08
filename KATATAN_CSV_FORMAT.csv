@@ -1,35 +1,37 @@
-﻿No,Test Subject,Preconditions,Steps,Expected Result,Notes
-1,Can create a new board from the home screen,User is logged in,"Navigate to {{app_login_url}} and log in with 'demo@example.com'
+﻿No,Labels,Test Subject,Preconditions,Steps,Expected Result,Notes,Images
+1,,Can create a new board from the home screen,User is logged in,"Navigate to {{app_login_url}} and log in with 'demo@example.com'
 Navigate to {{app_home_url}}
 Click {{home_create_board_button}}
 Enter the board name 'E2E Test Board' in {{dialog_board_name_input}}
-Click {{dialog_create_submit_button}}","Redirected to the board page, and the URL contains /boards/{boardId}",
-2,Can add a list to the board,A board has been created in case-1,"Navigate to {{app_board_url}} (using the boardId obtained in case-1)
+Click {{dialog_create_submit_button}}","Redirected to the board page, and the URL contains /boards/{boardId}",,
+2,,Can add a list to the board,A board has been created in case-1,"Navigate to {{app_board_url}} (using the boardId obtained in case-1)
 Click {{board_add_list_button}}
 Enter 'To Do' in {{list_title_input}}
-Click {{list_save_button}}",'To Do' list is displayed on the board,
-3,Can add a card to the list,A list has been created in case-2,"Navigate to {{app_board_url}}
+Click {{list_save_button}}",'To Do' list is displayed on the board,,
+3,,Can add a card to the list,A list has been created in case-2,"Navigate to {{app_board_url}}
 Click {{list_add_card_button}}
 Type 'Buy milk' in {{card_title_input}}
-Press the Enter key",'Buy milk' card appears at the bottom of the 'To Do' list,
-4,Can set a due date on a card,A card exists from case-3,"Navigate to {{app_board_url}}
+Press the Enter key",'Buy milk' card appears at the bottom of the 'To Do' list,,
+4,,Can set a due date on a card,A card exists from case-3,"Navigate to {{app_board_url}}
 Open the 'Buy milk' card
 Click {{card_due_date_button}}
-Select tomorrow in {{date_picker}}",The card shows a due date badge with tomorrow's date,The badge turns red once the due date has passed
-5,Can mark a card as done,A card exists from case-3,"Navigate to {{app_board_url}}
-Click {{card_done_checkbox}} on the 'Buy milk' card","The card has the 'is-done' class applied, and its title is struck through",
-6,Can delete a card,A card exists from case-3,"Navigate to {{app_board_url}}
+Select tomorrow in {{date_picker}}",The card shows a due date badge with tomorrow's date,The badge turns red once the due date has passed,
+5,,Can mark a card as done,A card exists from case-3,"Navigate to {{app_board_url}}
+Click {{card_done_checkbox}} on the 'Buy milk' card","The card has the 'is-done' class applied, and its title is struck through",,
+6,,Can delete a card,A card exists from case-3,"Navigate to {{app_board_url}}
 Click {{card_menu_button}} on the 'Buy milk' card
 Click {{menu_delete_item}}
-Click {{dialog_confirm_delete_button}}",'Buy milk' disappears from the 'To Do' list,
-7,Can delete a list,A list has been created in case-2,"Navigate to {{app_board_url}}
+Click {{dialog_confirm_delete_button}}",'Buy milk' disappears from the 'To Do' list,,
+7,,Can delete a list,A list has been created in case-2,"Navigate to {{app_board_url}}
 Click {{list_menu_button}} on the 'To Do' list
 Click {{menu_delete_item}}
-Click {{dialog_confirm_delete_button}}",'To Do' list disappears from the board,
-8,Can archive a board,A board has been created in case-1,"Navigate to {{app_board_settings_url}}
+Click {{dialog_confirm_delete_button}}",'To Do' list disappears from the board,,
+8,,Can archive a board,A board has been created in case-1,"Navigate to {{app_board_settings_url}}
 Click {{board_archive_button}}
-Click {{dialog_confirm_button}}","Redirected to the home screen, and 'E2E Test Board' is not in the board list",Archived boards can be restored for 30 days
-9,Can delete the account,User is logged in,"Navigate to {{app_account_settings_url}}
+Click {{dialog_confirm_button}}","Redirected to the home screen, and 'E2E Test Board' is not in the board list",Archived boards can be restored for 30 days,
+9,,Can delete the account,User is logged in,"Navigate to {{app_account_settings_url}}
 Click {{account_delete_button}}
 Enter 'demo@example.com' in {{dialog_confirm_input}}
-Click {{dialog_confirm_delete_button}}","Logged out, and logging in with 'demo@example.com' fails",
+Click {{dialog_confirm_delete_button}}","Logged out, and logging in with 'demo@example.com' fails",,
+,test,Test insert line,,,,,"KATATAN_CSV_FORMAT.assets/row-10.png
+KATATAN_CSV_FORMAT.assets/row-10.jpg"
