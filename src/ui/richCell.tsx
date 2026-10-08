@@ -175,6 +175,9 @@ export function createRichRenderer(viewRef: ViewRef): CustomRenderer<RichCell> {
         const hit = hitCell(layout, args.hoverX, args.hoverY ?? 0, rect.height);
         const pointer = hit && (hit.kind !== "run" || isLinkRun(hit.run, view));
         args.overrideCursor?.(pointer ? "pointer" : undefined);
+        // A chip showing a variable's value: hint the `{{name}}` behind it.
+        const resolved = hit?.kind === "run" && hit.run.kind === "var" && hit.run.ref !== undefined && !hit.run.text.startsWith("{{");
+        view.onHint(resolved ? `{{${hit.run.ref}}}` : null);
       }
     },
     onClick: (args) => {

@@ -1,6 +1,38 @@
 import { useState } from "react";
-import type { TreeNode } from "../fs/fileAccess";
 import { Icon } from "./icons";
+
+export interface TreeNode {
+  name: string;
+  /** Path from the root, "/"-separated ("" for the root). */
+  path: string;
+  kind: "dir" | "file";
+  children?: TreeNode[];
+}
+
+/** Builds a folder tree from file paths. Folders are listed before files. */
+export function buildTree(name: string, paths: string[]): TreeNode {
+  const root: TreeNode = { name, path: "", kind: "dir", children: [] };
+  for (const path of paths) {
+    const segs = path.split("/");
+    let node = root;
+    segs.forEach((seg, i) => {
+      const childPath = segs.slice(0, i + 1).join("/");
+      const isFile = i === segs.length - 1;
+      let child = node.children!.find((c) => c.name === seg && c.kind === (isFile ? "file" : "dir"));
+      if (!child) {
+        child = isFile ? { name: seg, path: childPath, kind: "file" } : { name: seg, path: childPath, kind: "dir", children: [] };
+        node.children!.push(child);
+      }
+      node = child;
+    });
+  }
+  const sort = (n: TreeNode) => {
+    n.children?.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name, "ja", { numeric: true }) : a.kind === "dir" ? -1 : 1));
+    n.children?.forEach(sort);
+  };
+  sort(root);
+  return root;
+}
 
 export function FileTree({
   tree,
@@ -12,7 +44,7 @@ export function FileTree({
   tree: TreeNode;
   activePath: string | null;
   dirty: boolean;
-  onOpen: (node: TreeNode) => void;
+  onOpen: (path: string) => void;
   onRefresh: () => void;
 }) {
   return (
@@ -49,7 +81,7 @@ function Node({
   node: TreeNode;
   activePath: string | null;
   dirty: boolean;
-  onOpen: (node: TreeNode) => void;
+  onOpen: (path: string) => void;
   depth: number;
 }) {
   const [open, setOpen] = useState(depth < 2 || (activePath?.startsWith(node.path + "/") ?? false));
@@ -77,7 +109,7 @@ function Node({
       <button
         className={`tree-item file${active ? " active" : ""}`}
         style={pad}
-        onClick={() => onOpen(node)}
+        onClick={() => onOpen(node.path)}
         aria-current={active ? "page" : undefined}
         title={node.path}
       >

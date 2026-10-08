@@ -74,8 +74,9 @@ KATATAN 以外の CSV は汎用ルールで表示します。数値は右寄せ�
 
 ```bash
 npm test           # 単体テスト（ロスレスな往復変換、git diff で1行だけ変わることの確認を含む）
-npm run e2e        # Chrome での E2E テスト（OPFS 上のフォルダで開く → 編集 → 保存まで）
+npm run e2e        # Chrome での E2E テスト（OPFS 上のフォルダで開く → 編集 → 保存まで、ライブラリとしての組み込み）
 npm run typecheck
+npm run build:lib  # ライブラリ @katatan/csv4test を dist-lib/ に出力（docs/library-integration.md）
 ```
 
 主なファイル：
@@ -84,7 +85,11 @@ npm run typecheck
 - `src/rules/` — ルールのスキーマ、プリセット（`katatan` / `generic`）、自動判定、トークン分割、検証
 - `src/editor/` — Undo / Redo、クリップボード（TSV）、検索と置換、変更の計算、表示行の計算
 - `src/ui/` — Glide Data Grid のカスタムセル（Canvas 描画）とエディター、パネル類
-- `src/fs/` — File System Access API、画像の読み書き
+- `src/fs/` — File System Access API の低レベルな関数、画像の読み込み
+- `src/storage/` — ファイルの読み書きの抽象（`StorageBackend`）と、フォルダ・単一ファイル・メモリ上の実装
+- `src/Editor.tsx` — 編集画面（backend を受け取る。単体アプリとライブラリで共通）
+- `src/App.tsx` — 単体アプリの外枠（フォルダやファイルを開く、ようこそ画面、ドラッグ＆ドロップ）
+- `src/lib/` — ライブラリの入口（`mount`、`core`）
 
 ## ライセンス
 

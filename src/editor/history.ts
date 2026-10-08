@@ -1,4 +1,4 @@
-import { markSaved, type CsvDoc } from "../csv/document";
+import { markSaved, setCells, type CellEdit, type CsvDoc } from "../csv/document";
 
 /**
  * Undo/redo over immutable document snapshots. Records are shared between
@@ -17,7 +17,12 @@ export type EditorAction =
   | { type: "apply"; label: string; update: (doc: CsvDoc) => CsvDoc }
   | { type: "undo" }
   | { type: "redo" }
-  | { type: "saved" };
+  /**
+   * A save finished. `doc` is the snapshot that was written (edits made while
+   * saving stay unsaved); `assigned` are values the backend filled in, which
+   * become part of the saved baseline.
+   */
+  | { type: "saved"; doc?: CsvDoc; assigned?: CellEdit[] };
 
 const LIMIT = 300;
 
@@ -47,10 +52,25 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { doc, past: [...state.past, state.doc], future, lastAction: "やり直す" };
     }
     case "saved": {
+      const snapshot = action.doc ?? state.doc;
       // Every snapshot compares against the new baseline from now on.
-      const saved = markSaved(state.doc);
-      const rebase = (d: CsvDoc): CsvDoc => ({ ...d, originals: saved.originals, originalOrder: saved.originalOrder });
-      return { doc: saved, past: state.past.map(rebase), future: state.future.map(rebase), lastAction: "保存しました" };
+      const saved = markSaved(action.assigned?.length ? setCells(snapshot, action.assigned) : snapshot);
+      const written = new Map(snapshot.records.map((r) => [r.id, r]));
+      const rebase = (d: CsvDoc): CsvDoc => ({
+        ...d,
+        // Records untouched since the snapshot become the saved ones (with assigned values).
+        records: d.records.map((r) => (written.get(r.id) === r ? (saved.originals.get(r.id) ?? r) : r)),
+        originals: saved.originals,
+        originalOrder: saved.originalOrder,
+      });
+      let doc = rebase(state.doc);
+      // Records edited while saving still get the assigned values.
+      const late = (action.assigned ?? []).filter((e) => {
+        const r = doc.records.find((x) => x.id === e.recordId);
+        return r !== undefined && r !== saved.originals.get(e.recordId);
+      });
+      if (late.length > 0) doc = setCells(doc, late);
+      return { doc, past: state.past.map(rebase), future: state.future.map(rebase), lastAction: "保存しました" };
     }
   }
 }

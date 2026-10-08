@@ -13,8 +13,8 @@ import {
   type GridSelection,
   type Item,
   type Rectangle,
+  type Theme,
 } from "@glideapps/glide-data-grid";
-import "@glideapps/glide-data-grid/dist/index.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { cellValue, columnCount, setCells, type CellEdit, type CsvDoc } from "../csv/document";
 import type { CsvRecord } from "../csv/types";
@@ -42,7 +42,15 @@ export interface GridProps {
   canMoveRows: boolean;
   /** Show blank rows below the data that become records when typed into (off while filtered). */
   canExtend: boolean;
+  /** Nothing can be edited. */
+  readOnly: boolean;
+  /** Columns whose cells cannot be edited. */
+  readOnlyCols: ReadonlySet<number>;
+  /** Columns can be inserted and moved. */
+  canEditColumns: boolean;
   highlights: DataEditorProps["highlightRegions"];
+  /** Host overrides for the canvas theme (the canvas cannot read CSS variables). */
+  themeOverride?: Partial<Theme>;
   apply(label: string, update: (doc: CsvDoc) => CsvDoc): void;
   /** Inserts a blank row next to the record shown at view row `row`. */
   onInsertRow(row: number, below: boolean): void;
@@ -111,7 +119,7 @@ export function Grid(props: GridProps) {
 
   const renderers = useMemo(() => [createRichRenderer(viewRef)], []);
   const imageWindowLoader = useMemo(() => new ImageWindowLoaderImpl(), []);
-  const theme = useMemo(() => gridTheme(mode), [mode]);
+  const theme = useMemo(() => ({ ...gridTheme(mode), ...props.themeOverride }), [mode, props.themeOverride]);
   const colCount = rules.columns.length;
   const rowCount = rows.length + (props.canExtend ? BLANK_ROWS : 0);
 
@@ -137,12 +145,13 @@ export function Grid(props: GridProps) {
       const record = rows[row];
       const column = rules.columns[col];
       const value = cellValue(record, col);
-      return richCell(
+      const cell = richCell(
         { kind: "rich-cell", value, recordId: record?.id ?? -1, col, dirty: record ? isCellDirty(record, col, view.originals, view.columnMap) : false },
         backgroundColor(view.mode, column?.rule.background),
       );
+      return props.readOnly || props.readOnlyCols.has(col) ? { ...cell, allowOverlay: false, readonly: true } : cell;
     },
-    [rows, rules.columns, view],
+    [rows, rules.columns, view, props.readOnly, props.readOnlyCols],
   );
 
   // Row heights depend on every cell's wrapped layout; cache per record object.
@@ -363,7 +372,8 @@ export function Grid(props: GridProps) {
   let insertButtons: JSX.Element[] = [];
   const box = containerRef.current?.getBoundingClientRect();
   const bounds = hover && (hover.kind === "row" ? gridRef.current?.getBounds(-1, hover.index) : gridRef.current?.getBounds(hover.index, -1));
-  if (hover && box && bounds) {
+  const canInsert = hover && !props.readOnly && (hover.kind === "row" || props.canEditColumns);
+  if (hover && canInsert && box && bounds) {
     const rect = { ...bounds, x: bounds.x - box.left, y: bounds.y - box.top };
     const { index } = hover;
     if (hover.kind === "row") {
@@ -407,7 +417,7 @@ export function Grid(props: GridProps) {
         gridSelection={selection}
         onGridSelectionChange={props.onSelectionChange}
         getCellsForSelection
-        fillHandle
+        fillHandle={!props.readOnly}
         onCellsEdited={onCellsEdited}
         onDelete={onDelete}
         keybindings={{ copy: false, cut: false, paste: false, search: false }}
@@ -421,8 +431,8 @@ export function Grid(props: GridProps) {
           scrollOffset.current = [tx ?? 0, ty ?? 0];
           if (scrolled) setHover(null);
         }}
-        onRowMoved={props.canMoveRows ? props.onMoveRow : undefined}
-        onColumnMoved={props.onMoveColumn}
+        onRowMoved={props.canMoveRows && !props.readOnly ? props.onMoveRow : undefined}
+        onColumnMoved={props.canEditColumns && !props.readOnly ? props.onMoveColumn : undefined}
         onColumnResize={(_c, size, index) => props.onColumnResize(index, size)}
         onHeaderMenuClick={props.onHeaderMenu}
         onHeaderContextMenu={(col, e) => {

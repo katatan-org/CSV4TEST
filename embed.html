@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CSV4TEST embed test host</title>
+    <!--
+      E2E host page (dev server only, not part of the app build): a page that is
+      not React and has its own styles, embedding the library through mount().
+    -->
+    <style>
+      body { margin: 0; font-family: Georgia, serif; background: rgb(250, 245, 230); }
+      header { padding: 8px; display: flex; gap: 8px; }
+      button { background: rgb(10, 120, 60); color: white; border: 0; padding: 4px 10px; }
+      #editor { height: 560px; border-top: 2px solid #999; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <input id="host-input" placeholder="host input" />
+      <button id="host-btn">Host button</button>
+    </header>
+    <div id="editor"></div>
+    <script type="module">
+      import { mount, MemoryBackend } from "/src/lib/index.tsx";
+
+      window.__embed = {
+        mount(files, capabilities, options = {}) {
+          window.__embed.editor?.unmount();
+          const { variables, ...mountOptions } = options;
+          const backend = new MemoryBackend({ files, capabilities, variables });
+          window.__embed.backend = backend;
+          window.__embed.editor = mount(document.getElementById("editor"), { backend, theme: "light", ...mountOptions });
+        },
+        saved() {
+          return window.__embed.backend.saved.map((c) => ({
+            message: c.message,
+            force: !!c.force,
+            files: c.files.map((f) => ({ path: f.path, op: f.op, baseVersion: f.baseVersion, text: f.bytes ? new TextDecoder("utf-8", { ignoreBOM: true }).decode(f.bytes) : null })),
+            records: c.records && {
+              path: c.records.path,
+              order: c.records.order.length,
+              headers: c.records.headers,
+              changes: c.records.changes.map((x) => ({ kind: x.kind, cells: x.cells.map((y) => ({ header: y.header, after: y.after })) })),
+            },
+          }));
+        },
+      };
+    </script>
+  </body>
+</html>

@@ -12,6 +12,8 @@ export interface SidePanelProps {
   onClose(): void;
   issues: Issue[];
   variables: VariableUse[];
+  /** Variables defined by the backend (e.g. a dictionary); undefined when it has none. */
+  definedVariables?: ReadonlyMap<string, string | undefined>;
   labels: { name: string; count: number; color: { bg: string; fg: string } }[];
   activeLabels: string[];
   onToggleLabel(name: string): void;
@@ -152,7 +154,7 @@ function ChangesTab({ changes, onJump, describeRecord, canSave, onSave }: SidePa
   );
 }
 
-function VariablesTab({ variables, onFilterText }: SidePanelProps) {
+function VariablesTab({ variables, definedVariables, onFilterText }: SidePanelProps) {
   if (variables.length === 0) return <p className="empty">{"{{変数}}"} は使われていません</p>;
   return (
     <>
@@ -163,6 +165,11 @@ function VariablesTab({ variables, onFilterText }: SidePanelProps) {
             <button onClick={() => onFilterText(`{{${v.name}}}`)}>
               <code>{`{{${v.name}}}`}</code>
               <span className="count">{v.recordIds.length}行</span>
+              {definedVariables && (
+                <span className={`var-value${definedVariables.has(v.name) ? "" : " undefined"}`}>
+                  {definedVariables.has(v.name) ? (definedVariables.get(v.name) ?? "") : "未定義"}
+                </span>
+              )}
             </button>
           </li>
         ))}
