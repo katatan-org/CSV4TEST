@@ -941,9 +941,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     for (const [k, v] of Object.entries(themeVarsRef.current ?? {})) portal.style.setProperty(k, v);
   }, [mode, props.themeVars]);
 
-  // Test seam for E2E (dev server only).
+  // Test seam for E2E: on the dev server, or in a host page that opts in by setting
+  // `window.__CSV4TEST_TEST_HOOKS__ = true` before mounting (e.g. a Playwright init script).
+  // The grid is drawn on a canvas, so tests need it to find cells and read the document.
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
+    const optedIn = (window as unknown as { __CSV4TEST_TEST_HOOKS__?: boolean }).__CSV4TEST_TEST_HOOKS__ === true;
+    if (!import.meta.env.DEV && !optedIn) return;
     const w = window as unknown as { __csv4test?: Record<string, unknown> };
     w.__csv4test = {
       ...w.__csv4test,
