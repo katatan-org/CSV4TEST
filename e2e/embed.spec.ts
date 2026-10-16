@@ -213,3 +213,48 @@ test("variables from the backend show their values, and undefined ones are repor
   await expect(panel.locator(".var-list li", { hasText: "{{ID}}" })).toContainText("admin");
   await expect(panel.locator(".var-list li", { hasText: "{{PW}}" })).toContainText("未定義");
 });
+
+test("a slow commit shows its progress and then its result on the button", async ({ page }) => {
+  await mountEditor(page, { commitMessage: true });
+  // Hold the save until the test releases it.
+  await page.evaluate(() => {
+    const w = window as unknown as { __embed: { backend: { save: (c: unknown) => Promise<unknown> } }; __release?: () => void };
+    const original = w.__embed.backend.save.bind(w.__embed.backend);
+    w.__embed.backend.save = (c) => new Promise((resolve) => (w.__release = () => resolve(original(c))));
+  });
+  await editCell(page, 1, 2, "Edited");
+  await page.keyboard.press("Control+s");
+  await page.getByRole("dialog").locator("input").press("Enter");
+
+  const button = page.locator("#editor .save-button");
+  await expect(button).toHaveAttribute("aria-busy", "true");
+  await expect(button).toContainText("コミット中…");
+  await expect(button.locator("svg.spin")).toHaveCount(1);
+
+  await page.evaluate(() => (window as unknown as { __release: () => void }).__release());
+  await expect(button).toContainText("コミットしました");
+  await expect(button).toHaveAttribute("aria-busy", "false");
+  await expect(button).toContainText("コミット", { timeout: 4000 });
+  await expect(button).not.toContainText("コミットしました", { timeout: 4000 });
+});
+
+test("adding an image shows progress in the toolbar until it is stored", async ({ page }) => {
+  await mountEditor(page, { images: true });
+  await page.getByRole("button", { name: /Images/ }).click();
+  await page.evaluate(() => {
+    const w = window as unknown as { __embed: { backend: { addAsset: (...a: unknown[]) => Promise<string> } }; __releaseImage?: () => void };
+    const original = w.__embed.backend.addAsset.bind(w.__embed.backend);
+    w.__embed.backend.addAsset = (...a) => new Promise((resolve) => (w.__releaseImage = () => resolve(original(...a))));
+  });
+  const adding = page.evaluate(() => {
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "shot.png", { type: "image/png" });
+    const hook = (window as unknown as { __csv4test: { addImages(row: number, files: File[]): Promise<void> } }).__csv4test;
+    return hook.addImages(0, [png]);
+  });
+  const activity = page.locator("#editor .activity");
+  await expect(activity).toContainText("画像を追加中…");
+  await expect(activity.locator("svg.spin")).toHaveCount(1);
+  await page.evaluate(() => (window as unknown as { __releaseImage: () => void }).__releaseImage());
+  await adding;
+  await expect(activity).toHaveCount(0);
+});

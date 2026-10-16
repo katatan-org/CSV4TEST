@@ -153,6 +153,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   const [help, setHelp] = useState<"shortcuts" | "guide" | null>(null);
   const [lightbox, setLightbox] = useState<{ paths: string[]; index: number } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  /** Long-running work shown in the toolbar (e.g. adding images), or null. */
+  const [activity, setActivity] = useState<string | null>(null);
+  /** Briefly true after a save succeeded, so the save button can confirm it in place. */
+  const [justSaved, setJustSaved] = useState(false);
+  const justSavedTimer = useRef<number>();
+  useEffect(() => () => window.clearTimeout(justSavedTimer.current), []);
   const [externalChange, setExternalChange] = useState(false);
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [saving, setSaving] = useState(false);
@@ -607,6 +613,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       const assetsDir = assetsDirFor(features.images?.assetsDir ?? "{name}.assets", file.name);
       const id = idCol ? cellValue(record, idCol.index).trim() : "";
       const base = id ? `case-${id}` : `row-${doc.records.indexOf(record)}`;
+      setActivity(files.length > 1 ? `画像を${files.length}枚追加中…` : "画像を追加中…");
       try {
         const paths: string[] = [];
         for (const f of files) paths.push(await imageStore.add(f, assetsDir, base));
@@ -620,6 +627,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         toast(`${paths.join(", ")} を保存しました`);
       } catch (e) {
         toast(`画像を追加できませんでした: ${(e as Error).message}`, "error");
+      } finally {
+        setActivity(null);
       }
     },
     [imageStore, imagesWritable, imagesCol, file, doc.records, features.images?.assetsDir, idCol, apply, toast, readOnly, caps],
@@ -859,6 +868,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
           b.watch?.(f.path, version);
           setExternalChange(false);
           setConflict(null);
+          window.clearTimeout(justSavedTimer.current);
+          setJustSaved(true);
+          justSavedTimer.current = window.setTimeout(() => setJustSaved(false), 2000);
           if (!b.capabilities.autosave) {
             toast(result.message ?? (b.capabilities.download ? `${f.name} をダウンロードしました` : `${f.path} を保存しました`));
           }
@@ -929,9 +941,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     for (const [k, v] of Object.entries(themeVarsRef.current ?? {})) portal.style.setProperty(k, v);
   }, [mode, props.themeVars]);
 
-  // Test seam for E2E (dev server only).
+  // Test seam for E2E: on the dev server, or in a host page that opts in by setting
+  // `window.__CSV4TEST_TEST_HOOKS__ = true` before mounting (e.g. a Playwright init script).
+  // The grid is drawn on a canvas, so tests need it to find cells and read the document.
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
+    const optedIn = (window as unknown as { __CSV4TEST_TEST_HOOKS__?: boolean }).__CSV4TEST_TEST_HOOKS__ === true;
+    if (!import.meta.env.DEV && !optedIn) return;
     const w = window as unknown as { __csv4test?: Record<string, unknown> };
     w.__csv4test = {
       ...w.__csv4test,
@@ -940,6 +955,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       text: () => stateRef.current.doc.records.map((r) => r.fields.map((f) => f.value)),
       selected: () => selection.current?.cell,
       selectedRows: () => selection.rows.toArray(),
+      /** Adds images to the data row at `row` (0-based), as dropping files on its Images cell does. */
+      addImages: (row: number, files: File[]) => {
+        const record = stateRef.current.doc.records[row + 1];
+        return record ? addImageFiles(record.id, files) : Promise.resolve();
+      },
     };
   });
 
@@ -1047,6 +1067,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     return t;
   }, [themeVars]);
   const saveLabel = caps?.download ? "ダウンロード" : caps?.commitMessage ? "コミット" : "保存";
+  // The save button shows its own progress and result, so a slow commit is never silent.
+  const saveButtonLabel = saving
+    ? caps?.commitMessage ? "コミット中…" : "保存中…"
+    : justSaved && !dirty
+      ? caps?.commitMessage ? "コミットしました" : "保存しました"
+      : saveLabel;
+  const saveButtonIcon = saving ? "spinner" : justSaved && !dirty ? "check" : caps?.download ? "download" : "save";
   const changeCount = changes.changes.length + (changes.reordered ? 1 : 0);
   const saveState = saving ? "保存中…" : conflict ? "競合あり" : dirty ? "未保存" : "保存済み";
 
@@ -1062,15 +1089,22 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
               </span>
             ) : (
               <button
-                className={dirty ? "primary" : undefined}
+                className={`save-button${dirty && !saving ? " primary" : ""}${justSaved && !dirty && !saving ? " done" : ""}`}
                 onClick={() => void save()}
                 disabled={!file || readOnly || saving}
+                aria-busy={saving}
                 title={`${saveLabel} (Ctrl+S)`}
               >
-                <Icon name={caps?.download ? "download" : "save"} />
-                <span className="label">{saveLabel}</span>
-                {dirty && <span className="badge">{changeCount}</span>}
+                <Icon name={saveButtonIcon} className={saving ? "spin" : undefined} />
+                <span className="label" role="status">{saveButtonLabel}</span>
+                {dirty && !saving && <span className="badge">{changeCount}</span>}
               </button>
+            )}
+            {activity && (
+              <span className="activity" role="status">
+                <Icon name="spinner" className="spin" />
+                {activity}
+              </span>
             )}
           </div>
           <div className="toolbar-group">

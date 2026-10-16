@@ -1032,6 +1032,34 @@
   pointer-events: none;
 }
 
+/* ---- Progress ---- */
+
+@keyframes c4t-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.c4t .spin {
+  animation: c4t-spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .c4t .spin {
+    animation-duration: 2.4s;
+  }
+}
+.c4t .save-button.done {
+  color: var(--ok, #15803d);
+  border-color: currentColor;
+}
+.c4t .activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .c4t .toasts {
   position: fixed;
   bottom: 40px;
