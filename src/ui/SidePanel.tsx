@@ -1,4 +1,5 @@
 import type { ChangeSummary } from "../editor/changes";
+import { useI18n, type Messages } from "../i18n";
 import type { Issue, VariableUse } from "../rules/analysis";
 import type { ResolvedRules } from "../rules/detect";
 import { PRESETS } from "../rules/detect";
@@ -18,7 +19,10 @@ export interface SidePanelProps {
   activeLabels: string[];
   onToggleLabel(name: string): void;
   changes: ChangeSummary;
+  /** Display names of the current columns. */
   headers: string[];
+  /** Display name of a column header (see Editor columnLabels); `col` is used when the header is empty. */
+  columnLabel(header: string, col: number): string;
   canSave: boolean;
   onSave(): void;
   onJump(recordId: number, col?: number): void;
@@ -34,15 +38,16 @@ export interface SidePanelProps {
   hasVariables: boolean;
 }
 
-const TABS: { id: PanelTab; label: string; icon: IconName }[] = [
-  { id: "issues", label: "検証", icon: "alert" },
-  { id: "changes", label: "変更", icon: "diff" },
-  { id: "variables", label: "変数", icon: "braces" },
-  { id: "labels", label: "ラベル", icon: "tag" },
-  { id: "rules", label: "表示ルール", icon: "rules" },
+const TABS: { id: PanelTab; label: (m: Messages) => string; icon: IconName }[] = [
+  { id: "issues", label: (m) => m.tabIssues, icon: "alert" },
+  { id: "changes", label: (m) => m.tabChanges, icon: "diff" },
+  { id: "variables", label: (m) => m.tabVariables, icon: "braces" },
+  { id: "labels", label: (m) => m.tabLabels, icon: "tag" },
+  { id: "rules", label: (m) => m.tabRules, icon: "rules" },
 ];
 
 export function SidePanel(p: SidePanelProps) {
+  const { m, number } = useI18n();
   const counts: Partial<Record<PanelTab, number>> = {
     issues: p.issues.length,
     changes: p.changes.changes.length + (p.changes.reordered ? 1 : 0),
@@ -51,16 +56,16 @@ export function SidePanel(p: SidePanelProps) {
   };
   const tabs = TABS.filter((t) => (t.id === "variables" ? p.hasVariables : t.id === "labels" ? p.hasLabels : true));
   return (
-    <aside className="side-panel" aria-label="サイドパネル">
+    <aside className="side-panel" aria-label={m.sidePanel}>
       <div className="tabs" role="tablist">
         {tabs.map((t) => (
-          <button key={t.id} role="tab" aria-selected={p.tab === t.id} className={p.tab === t.id ? "active" : undefined} onClick={() => p.onTab(t.id)} title={t.label}>
+          <button key={t.id} role="tab" aria-selected={p.tab === t.id} className={p.tab === t.id ? "active" : undefined} onClick={() => p.onTab(t.id)} title={t.label(m)}>
             <Icon name={t.icon} size={14} />
-            <span>{t.label}</span>
-            {counts[t.id] ? <span className={`count${t.id === "issues" ? " warn" : t.id === "changes" ? " dirty" : ""}`}>{counts[t.id]}</span> : null}
+            <span>{t.label(m)}</span>
+            {counts[t.id] ? <span className={`count${t.id === "issues" ? " warn" : t.id === "changes" ? " dirty" : ""}`}>{number(counts[t.id]!)}</span> : null}
           </button>
         ))}
-        <button className="icon-button close" onClick={p.onClose} aria-label="パネルを閉じる">
+        <button className="icon-button close" onClick={p.onClose} aria-label={m.closePanel}>
           <Icon name="x" size={14} />
         </button>
       </div>
@@ -76,13 +81,14 @@ export function SidePanel(p: SidePanelProps) {
 }
 
 function IssuesTab({ issues, onJump, describeRecord, headers }: SidePanelProps) {
-  if (issues.length === 0) return <p className="empty ok">問題は見つかりませんでした</p>;
+  const { m } = useI18n();
+  if (issues.length === 0) return <p className="empty ok">{m.noIssues}</p>;
   return (
     <ul className="issue-list">
       {issues.map((issue, i) => (
         <li key={i}>
           <button disabled={issue.recordId === undefined} onClick={() => issue.recordId !== undefined && onJump(issue.recordId, issue.col)}>
-            <span className={`sev ${issue.severity}`}>{issue.severity === "error" ? "エラー" : "警告"}</span>
+            <span className={`sev ${issue.severity}`}>{issue.severity === "error" ? m.severityError : m.severityWarning}</span>
             <span className="issue-msg">{issue.message}</span>
             {issue.recordId !== undefined && (
               <span className="issue-loc">
@@ -97,55 +103,57 @@ function IssuesTab({ issues, onJump, describeRecord, headers }: SidePanelProps) 
   );
 }
 
-function ChangesTab({ changes, onJump, describeRecord, canSave, onSave }: SidePanelProps) {
+function ChangesTab({ changes, onJump, describeRecord, canSave, onSave, columnLabel }: SidePanelProps) {
+  const { m } = useI18n();
   const { changes: list, reordered, dirtyCells, columns } = changes;
-  if (list.length === 0 && !reordered) return <p className="empty ok">保存されていない変更はありません</p>;
+  if (list.length === 0 && !reordered) return <p className="empty ok">{m.noChanges}</p>;
+  const names = (headers: string[]) => headers.map((h) => columnLabel(h, -1)).join(m.listSeparator);
   const columnNote = [
-    columns.added.length > 0 ? `列を追加: ${columns.added.join(", ")}` : "",
-    columns.removed.length > 0 ? `列を削除: ${columns.removed.join(", ")}` : "",
+    columns.added.length > 0 ? m.columnsAdded({ columns: names(columns.added) }) : "",
+    columns.removed.length > 0 ? m.columnsRemoved({ columns: names(columns.removed) }) : "",
   ].filter(Boolean);
   return (
     <div className="changes">
       <div className="changes-summary">
         <span>
-          {list.length}行 / {dirtyCells}セル
-          {reordered ? " ・行の順序が変更" : ""}
+          {m.changeCounts({ rows: list.length, cells: dirtyCells })}
+          {reordered ? m.rowsReordered : ""}
         </span>
         <button className="primary small" onClick={onSave} disabled={!canSave}>
           <Icon name="save" size={13} />
-          保存
+          {m.save}
         </button>
       </div>
       {columnNote.length > 0 && (
         <p className="panel-hint warn-note">
-          {columnNote.join(" ・ ")}。列の構成が変わったため、保存するとファイルの全行が書き換わります。
+          {m.columnsChangedNote({ changes: columnNote.join(m.bulletSeparator) })}
         </p>
       )}
       <ul className="change-list">
         {list.map((c) => (
           <li key={`${c.kind}-${c.record.id}`} className={c.kind}>
             <button disabled={c.kind === "removed"} onClick={() => onJump(c.record.id, c.cells[0]?.col)}>
-              <span className={`change-kind ${c.kind}`}>{c.kind === "added" ? "追加" : c.kind === "removed" ? "削除" : "変更"}</span>
-              <span className="change-row">{c.kind === "removed" ? `元の ${c.index} 行目` : describeRecord(c.record.id)}</span>
+              <span className={`change-kind ${c.kind}`}>{c.kind === "added" ? m.changeAdded : c.kind === "removed" ? m.changeRemoved : m.changeModified}</span>
+              <span className="change-row">{c.kind === "removed" ? m.originalRow({ n: c.index }) : describeRecord(c.record.id)}</span>
             </button>
             {c.kind === "modified" && (
               <dl>
                 {c.cells.map((cell) => (
                   <div key={`${cell.col}:${cell.header}`}>
                     <dt>
-                      {cell.header || `列 ${cell.col + 1}`}
-                      {cell.col < 0 ? "（削除された列）" : ""}
+                      {columnLabel(cell.header, cell.col)}
+                      {cell.col < 0 ? m.removedColumn : ""}
                     </dt>
                     <dd>
-                      <del>{cell.before || "（空）"}</del>
-                      <ins>{cell.after || "（空）"}</ins>
+                      <del>{cell.before || m.emptyValue}</del>
+                      <ins>{cell.after || m.emptyValue}</ins>
                     </dd>
                   </div>
                 ))}
               </dl>
             )}
             {c.kind !== "modified" && (
-              <p className="change-preview">{c.cells.map((x) => x.after || x.before).filter(Boolean).slice(0, 3).join(" ・ ")}</p>
+              <p className="change-preview">{c.cells.map((x) => x.after || x.before).filter(Boolean).slice(0, 3).join(m.bulletSeparator)}</p>
             )}
           </li>
         ))}
@@ -155,19 +163,20 @@ function ChangesTab({ changes, onJump, describeRecord, canSave, onSave }: SidePa
 }
 
 function VariablesTab({ variables, definedVariables, onFilterText }: SidePanelProps) {
-  if (variables.length === 0) return <p className="empty">{"{{変数}}"} は使われていません</p>;
+  const { m } = useI18n();
+  if (variables.length === 0) return <p className="empty">{m.noVariables}</p>;
   return (
     <>
-      <p className="panel-hint">クリックすると、その変数を使う行だけを表示します。</p>
+      <p className="panel-hint">{m.variablesHint}</p>
       <ul className="var-list">
         {variables.map((v) => (
           <li key={v.name}>
             <button onClick={() => onFilterText(`{{${v.name}}}`)}>
               <code>{`{{${v.name}}}`}</code>
-              <span className="count">{v.recordIds.length}行</span>
+              <span className="count">{m.rowCount({ count: v.recordIds.length })}</span>
               {definedVariables && (
                 <span className={`var-value${definedVariables.has(v.name) ? "" : " undefined"}`}>
-                  {definedVariables.has(v.name) ? (definedVariables.get(v.name) ?? "") : "未定義"}
+                  {definedVariables.has(v.name) ? (definedVariables.get(v.name) ?? "") : m.undefinedVariable}
                 </span>
               )}
             </button>
@@ -179,10 +188,11 @@ function VariablesTab({ variables, definedVariables, onFilterText }: SidePanelPr
 }
 
 function LabelsTab({ labels, activeLabels, onToggleLabel }: SidePanelProps) {
-  if (labels.length === 0) return <p className="empty">ラベルはまだありません。Labels列のセルに1行1ラベルで入力します。</p>;
+  const { m, number } = useI18n();
+  if (labels.length === 0) return <p className="empty">{m.noLabels}</p>;
   return (
     <>
-      <p className="panel-hint">ラベルを選ぶと、そのラベルを持つ行だけを表示します（複数選択はOR）。</p>
+      <p className="panel-hint">{m.labelsHint}</p>
       <div className="label-chips">
         {labels.map((l) => {
           const on = activeLabels.includes(l.name);
@@ -195,7 +205,7 @@ function LabelsTab({ labels, activeLabels, onToggleLabel }: SidePanelProps) {
               onClick={() => onToggleLabel(l.name)}
             >
               {l.name}
-              <span className="count">{l.count}</span>
+              <span className="count">{number(l.count)}</span>
             </button>
           );
         })}
@@ -204,32 +214,31 @@ function LabelsTab({ labels, activeLabels, onToggleLabel }: SidePanelProps) {
   );
 }
 
-function RulesTab({ rules, presetChoice, onPreset, override, missingOptional, onAddOptional }: SidePanelProps) {
+function RulesTab({ rules, presetChoice, onPreset, override, missingOptional, onAddOptional, columnLabel }: SidePanelProps) {
+  const { m } = useI18n();
   return (
     <div className="rules-tab">
       <label className="field">
-        表示ルール
+        {m.rulesLabel}
         <select value={presetChoice} onChange={(e) => onPreset(e.target.value)}>
-          <option value="auto">自動判定（{rules.ruleSet.name}）</option>
+          <option value="auto">{m.autoDetect({ preset: rules.ruleSet.name })}</option>
           {PRESETS.map((p) => (
             <option key={p.name} value={p.name}>
-              {p.name === "katatan" ? "KATATAN テストケース" : "汎用CSV"}
+              {p.name === "katatan" ? m.presetKatatanCases : m.presetGeneric}
             </option>
           ))}
         </select>
       </label>
       {override.path && (
-        <p className="panel-hint">
-          <code>{override.path}</code> の設定を適用中
-        </p>
+        <p className="panel-hint">{m.overrideApplied({ path: override.path })}</p>
       )}
-      {override.error && <p className="error-text">.csvview.json を読み込めません: {override.error}</p>}
+      {override.error && <p className="error-text">{m.overrideError({ detail: override.error })}</p>}
       {missingOptional.length > 0 && (
         <div className="optional-cols">
           {missingOptional.map((name) => (
             <button key={name} className="small" onClick={() => onAddOptional(name)}>
               <Icon name="plus" size={13} />
-              {name} 列を追加
+              {m.addColumnButton({ name })}
             </button>
           ))}
         </div>
@@ -237,24 +246,22 @@ function RulesTab({ rules, presetChoice, onPreset, override, missingOptional, on
       <table className="rule-table">
         <thead>
           <tr>
-            <th>列</th>
-            <th>表示</th>
+            <th>{m.ruleColumn}</th>
+            <th>{m.ruleDisplay}</th>
           </tr>
         </thead>
         <tbody>
           {rules.columns.map((c) => (
             <tr key={c.index}>
-              <td>{c.header || `(列 ${c.index + 1})`}</td>
-              <td>{describeRule(c.rule)}</td>
+              <td>{columnLabel(c.header, c.index)}</td>
+              <td>{describeRule(c.rule, m)}</td>
             </tr>
           ))}
         </tbody>
       </table>
       <details className="panel-hint">
-        <summary>ルールをカスタマイズするには</summary>
-        <p>
-          CSVと同じフォルダ（または上位フォルダ）に <code>.csvview.json</code> を置くと、列ごとの幅・色・表示方法を上書きできます。
-        </p>
+        <summary>{m.customizeRules}</summary>
+        <p>{m.customizeRulesHint}</p>
         <pre>{`{
   "extends": "katatan",
   "columns": [
@@ -268,16 +275,16 @@ function RulesTab({ rules, presetChoice, onPreset, override, missingOptional, on
   );
 }
 
-function describeRule(rule: ResolvedRules["columns"][number]["rule"]): string {
+function describeRule(rule: ResolvedRules["columns"][number]["rule"], m: Messages): string {
   const parts: string[] = [];
-  const display: Record<string, string> = { steps: "番号付き手順", labels: "ラベル", images: "画像", id: "ID" };
+  const display: Record<string, string> = { steps: m.ruleSteps, labels: m.ruleLabels, images: m.ruleImages, id: m.ruleId };
   if (rule.display && display[rule.display]) parts.push(display[rule.display]);
-  if (rule.badge) parts.push("バッジ");
-  if (rule.wrap) parts.push("折り返し");
-  if (rule.tokens) parts.push("強調");
-  if (rule.pinned) parts.push("固定");
-  if (rule.align === "right") parts.push("右寄せ");
-  if (rule.font === "mono") parts.push("等幅");
-  if (rule.format) parts.push(`表示: ${rule.format.replace("{value}", "…")}`);
-  return parts.join(" ・ ") || "テキスト";
+  if (rule.badge) parts.push(m.ruleBadge);
+  if (rule.wrap) parts.push(m.ruleWrap);
+  if (rule.tokens) parts.push(m.ruleTokens);
+  if (rule.pinned) parts.push(m.rulePinned);
+  if (rule.align === "right") parts.push(m.ruleAlignRight);
+  if (rule.font === "mono") parts.push(m.ruleMono);
+  if (rule.format) parts.push(m.ruleFormat({ format: rule.format.replace("{value}", "…") }));
+  return parts.join(m.bulletSeparator) || m.ruleText;
 }

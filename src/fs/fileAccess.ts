@@ -3,6 +3,7 @@
  * storage/fsAccess.ts build on these; other browsers fall back to upload +
  * download (see fallback.ts).
  */
+import { StorageError } from "../storage/types";
 
 declare global {
   interface Window {
@@ -35,12 +36,12 @@ export function isCsvName(name: string): boolean {
 }
 
 export async function pickFolder(): Promise<FileSystemDirectoryHandle> {
-  if (!window.showDirectoryPicker) throw new Error("このブラウザはフォルダを開く機能に対応していません");
+  if (!window.showDirectoryPicker) throw new StorageError("no_folder_picker", "This browser cannot open folders");
   return window.showDirectoryPicker({ mode: "readwrite", id: "csv4test" });
 }
 
 export async function pickFile(): Promise<FileSystemFileHandle> {
-  if (!window.showOpenFilePicker) throw new Error("このブラウザはファイルを開く機能に対応していません");
+  if (!window.showOpenFilePicker) throw new StorageError("no_file_picker", "This browser cannot open files");
   const [handle] = await window.showOpenFilePicker({
     id: "csv4test",
     types: [{ description: "CSV", accept: { "text/csv": [".csv"], "text/tab-separated-values": [".tsv"] } }],
@@ -61,7 +62,7 @@ export async function readHandle(handle: FileSystemFileHandle): Promise<{ bytes:
 
 /** Overwrites the file and returns its new modification time. */
 export async function writeHandle(handle: FileSystemFileHandle, bytes: Uint8Array<ArrayBuffer>): Promise<number> {
-  if (!(await ensurePermission(handle, "readwrite"))) throw new Error("書き込みが許可されませんでした");
+  if (!(await ensurePermission(handle, "readwrite"))) throw new StorageError("permission_denied", "Permission to write was not granted");
   const writable = await handle.createWritable();
   await writable.write(bytes);
   await writable.close();

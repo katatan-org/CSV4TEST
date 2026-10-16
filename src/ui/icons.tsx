@@ -29,6 +29,7 @@ const PATHS = {
   refresh: "M21 12a9 9 0 1 1-2.6-6.4L21 8M21 3v5h-5",
   download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
   check: "M20 6 9 17l-5-5",
+  globe: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20",
   /** Rotated by the `spin` class while something is in progress. */
   spinner: "M21 12a9 9 0 1 1-6.2-8.6",
 } as const;

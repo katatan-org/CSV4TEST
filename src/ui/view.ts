@@ -1,4 +1,5 @@
 import type { CsvRecord } from "../csv/types";
+import type { Messages } from "../i18n/types";
 import type { ImageStore } from "../fs/imageStore";
 import type { ColorToken, ResolvedColumn, RuleSet } from "../rules/schema";
 import { layoutCell, type CellLayout } from "./cellLayout";
@@ -12,6 +13,8 @@ import type { ThemeMode } from "./theme";
  */
 export interface ViewContext {
   mode: ThemeMode;
+  /** UI messages, for text drawn on the canvas and the cell editor. */
+  m: Messages;
   columns: ResolvedColumn[];
   features: NonNullable<RuleSet["features"]>;
   labelColors: Record<string, ColorToken>;

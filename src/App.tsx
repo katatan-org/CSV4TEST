@@ -4,10 +4,12 @@
  * the page rather than the editor lives here: the start screen, drag & drop
  * onto the window, the page title, the unload prompt and the theme toggle.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Editor, type EditorHandle } from "./Editor";
 import { downloadBytes, pickFileByInput } from "./fs/fallback";
 import { isCsvName, pickFile, pickFolder, supportsFsAccess } from "./fs/fileAccess";
+import { createI18n, errorText, isLocale, matchLocale, type Locale, type Messages } from "./i18n";
+import { HELP } from "./i18n/help";
 import { FsAccessBackend, FsFileBackend } from "./storage/fsAccess";
 import { MemoryBackend } from "./storage/memory";
 import type { ChangeSet, StorageBackend } from "./storage/types";
@@ -15,7 +17,6 @@ import { Icon } from "./ui/icons";
 import type { ThemeMode } from "./ui/theme";
 
 const SAMPLE_URL = "sample/KATATAN_CSV_FORMAT.csv";
-const NO_FOLDER_SUPPORT = "このブラウザではフォルダを開けません。Chrome / Edge で使えます（違いは F1 のヘルプ「ブラウザによる違い」を参照）";
 
 interface Opened {
   backend: StorageBackend;
@@ -50,6 +51,33 @@ function useThemeMode(): [ThemeMode, () => void] {
   return [mode, toggle];
 }
 
+/** The UI language: the saved choice, else the browser's language. */
+function useLocale(): [Locale, () => void] {
+  const [locale, setLocale] = useState<Locale>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("csv4test:locale") ?? "null");
+      if (isLocale(saved)) return saved;
+    } catch {
+      /* fall back to the browser's language */
+    }
+    return matchLocale(navigator.language);
+  });
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+  const toggle = () =>
+    setLocale((l) => {
+      const next = l === "ja" ? "en" : "ja";
+      try {
+        localStorage.setItem("csv4test:locale", JSON.stringify(next));
+      } catch {
+        /* preference is just not remembered */
+      }
+      return next;
+    });
+  return [locale, toggle];
+}
+
 /** A file held in memory; saving downloads it. */
 function downloadBackend(path: string, bytes: Uint8Array): MemoryBackend {
   return new MemoryBackend({
@@ -63,6 +91,10 @@ function downloadBackend(path: string, bytes: Uint8Array): MemoryBackend {
 
 export function App() {
   const [mode, toggleMode] = useThemeMode();
+  const [locale, toggleLocale] = useLocale();
+  const { m } = useMemo(() => createI18n(locale), [locale]);
+  const mRef = useRef(m);
+  mRef.current = m;
   const [opened, setOpened] = useState<Opened | null>(null);
   const [dirty, setDirty] = useState(false);
   const [path, setPath] = useState<string | null>(null);
@@ -71,8 +103,8 @@ export function App() {
   const editorRef = useRef<EditorHandle>(null);
 
   const confirmDiscard = useCallback(
-    () => !editorRef.current?.isDirty() || window.confirm("保存していない変更があります。破棄して続けますか？"),
-    [],
+    () => !editorRef.current?.isDirty() || window.confirm(m.confirmDiscard),
+    [m],
   );
 
   const open = useCallback((next: Opened) => {
@@ -84,7 +116,7 @@ export function App() {
 
   const showError = useCallback((e: unknown) => {
     if ((e as Error).name === "AbortError") return;
-    setNotice((e as Error).message);
+    setNotice(errorText(e, mRef.current));
     setTimeout(() => setNotice(null), 6000);
   }, []);
 
@@ -114,7 +146,7 @@ export function App() {
 
   const openFolder = useCallback(async () => {
     if (!supportsFsAccess) {
-      showError(new Error(NO_FOLDER_SUPPORT));
+      showError(new Error(m.noFolderSupport));
       return;
     }
     try {
@@ -122,7 +154,7 @@ export function App() {
     } catch (e) {
       showError(e);
     }
-  }, [openFolderHandle, showError]);
+  }, [openFolderHandle, showError, m]);
 
   const openSingleFile = useCallback(async () => {
     try {
@@ -200,7 +232,7 @@ export function App() {
         if (handle?.kind === "directory") await openFolderHandle(handle as FileSystemDirectoryHandle);
         else if (handle?.kind === "file" && isCsvName(handle.name)) await openFileHandle(handle as FileSystemFileHandle);
         else if (files[0] && isCsvName(files[0].name)) await openUpload(files[0]);
-        else showError(new Error("CSV / TSV ファイルかフォルダをドロップしてください"));
+        else showError(new Error(mRef.current.dropUnsupported));
       } catch (err) {
         showError(err);
       }
@@ -228,14 +260,14 @@ export function App() {
           onClick={() => void openFolder()}
           aria-disabled={!supportsFsAccess}
           className={supportsFsAccess ? undefined : "unavailable"}
-          title={supportsFsAccess ? "フォルダを開く (Ctrl+O)" : NO_FOLDER_SUPPORT}
+          title={supportsFsAccess ? m.openFolderTitle : m.noFolderSupport}
         >
           <Icon name="folder" />
-          <span className="label">フォルダを開く</span>
+          <span className="label">{m.openFolder}</span>
         </button>
-        <button onClick={() => void openSingleFile()} title="ファイルを開く">
+        <button onClick={() => void openSingleFile()} title={m.openFileTitle}>
           <Icon name="file" />
-          <span className="label">ファイル</span>
+          <span className="label">{m.fileButton}</span>
         </button>
       </div>
     </>
@@ -250,13 +282,15 @@ export function App() {
         rootName={opened?.rootName}
         openFirst={opened?.openFirst}
         theme={mode}
+        locale={locale}
         onToggleTheme={toggleMode}
+        onToggleLocale={toggleLocale}
         toolbarStart={toolbarStart}
-        emptyState={<Welcome onFolder={openFolder} onFile={openSingleFile} onSample={openSample} />}
+        emptyState={<Welcome m={m} locale={locale} onFolder={openFolder} onFile={openSingleFile} onSample={openSample} />}
         onDirtyChange={setDirty}
         onFileChange={setPath}
       />
-      {dragOver && <div className="drop-overlay">CSVファイルかフォルダをドロップして開く</div>}
+      {dragOver && <div className="drop-overlay">{m.dropOverlay}</div>}
       {notice && (
         <div className="toasts" role="status" aria-live="polite">
           <div className="toast error">{notice}</div>
@@ -266,47 +300,51 @@ export function App() {
   );
 }
 
-function Welcome({ onFolder, onFile, onSample }: { onFolder: () => void; onFile: () => void; onSample: () => void }) {
+function Welcome({
+  m,
+  locale,
+  onFolder,
+  onFile,
+  onSample,
+}: {
+  m: Messages;
+  locale: Locale;
+  onFolder: () => void;
+  onFile: () => void;
+  onSample: () => void;
+}) {
   return (
     <div className="welcome">
-      <h1>テストケースCSVを、読みやすく編集する</h1>
-      <p className="lead">
-        CSVを開くと、列ごとのルールに沿って自動で整形して表示します。見た目の情報はCSVに書き込まないので、Gitの差分は編集した行だけになります。
-      </p>
+      <h1>{m.welcomeTitle}</h1>
+      <p className="lead">{m.welcomeLead}</p>
       <div className="welcome-actions">
         <button
           className={supportsFsAccess ? "primary large" : "large unavailable"}
           onClick={onFolder}
           aria-disabled={!supportsFsAccess}
-          title={supportsFsAccess ? undefined : NO_FOLDER_SUPPORT}
+          title={supportsFsAccess ? undefined : m.noFolderSupport}
         >
           <Icon name="folder" size={18} />
-          フォルダを開く
-          <small>
-            {supportsFsAccess ? "Gitリポジトリのフォルダを開き、その場で保存します" : "このブラウザでは使えません（Chrome / Edge で使えます）"}
-          </small>
+          {m.openFolder}
+          <small>{supportsFsAccess ? m.welcomeFolderNote : m.welcomeFolderUnavailable}</small>
         </button>
         <button className="large" onClick={onFile}>
           <Icon name="file" size={18} />
-          ファイルを開く
-          <small>{supportsFsAccess ? "CSVを1つだけ開きます（画像の追加はできません）" : "編集後はダウンロードで保存します"}</small>
+          {m.openFile}
+          <small>{supportsFsAccess ? m.welcomeFileNote : m.welcomeFileNoteDownload}</small>
         </button>
         <button className="large" onClick={onSample}>
           <Icon name="external" size={18} />
-          サンプルを開く
-          <small>KATATAN形式のサンプルで試す</small>
+          {m.openSample}
+          <small>{m.welcomeSampleNote}</small>
         </button>
       </div>
       <ul className="welcome-points">
-        <li>
-          <strong>KATATAN形式</strong>を自動で判定し、手順に番号を付け、<code>{"{{変数}}"}</code>・<code>'入力値'</code>・<code>case-N</code> を強調します
-        </li>
-        <li>
-          Excelのように範囲選択・コピー＆ペースト・フィル・Undoができます。Excelとのコピー＆ペーストでセル内改行も保たれます
-        </li>
-        <li>改行コード（CRLF/LF）・BOM・クォート・文字コードは元のまま保存します</li>
+        {HELP[locale].welcomePoints.map((point, i) => (
+          <li key={i}>{point}</li>
+        ))}
       </ul>
-      <p className="muted">CSVファイルやフォルダは、この画面にドラッグ＆ドロップしても開けます。</p>
+      <p className="muted">{m.welcomeDrop}</p>
     </div>
   );
 }

@@ -3,7 +3,7 @@
  * another framework (KATATAN is Svelte) can embed it. React and the grid are
  * bundled; the host does not need them.
  *
- *   const editor = mount(el, { backend, file: "tests/login.csv", theme: "light" });
+ *   const editor = mount(el, { backend, file: "tests/login.csv", theme: "light", locale: "en" });
  *   await editor.save();
  *   editor.unmount();
  */
@@ -12,9 +12,11 @@ import { createRoot } from "react-dom/client";
 import { Editor, type EditorHandle, type EditorProps } from "../Editor";
 import gridStyles from "@glideapps/glide-data-grid/dist/index.css?inline";
 import styles from "../styles.css?inline";
+import type { Locale, Messages } from "../i18n";
 import type { ThemeMode } from "../ui/theme";
 
 export type { EditorHandle } from "../Editor";
+export { en, ja, type Locale, type MessageKey, type Messages } from "../i18n";
 export { FsAccessBackend, FsFileBackend } from "../storage/fsAccess";
 export { MemoryBackend, type MemoryBackendOptions } from "../storage/memory";
 export * from "../storage/types";
@@ -30,6 +32,12 @@ export interface MountOptions {
   theme?: ThemeMode;
   /** CSS variable overrides, e.g. { "--accent": "#0f766e" } (see EditorProps.themeVars). */
   themeVars?: Record<string, string>;
+  /** UI language (default "ja"). Change it later with `update({ locale })`. */
+  locale?: Locale;
+  /** Overrides for single messages, e.g. { save: "Save", savedPath: ({ path }) => `${path} saved` }. */
+  messages?: Partial<Messages>;
+  /** Names shown for column headers, e.g. { "Test Subject": "テスト項目名" }. The CSV keeps its headers. */
+  columnLabels?: Record<string, string>;
   onDirtyChange?(dirty: boolean): void;
   onFileChange?(path: string | null): void;
   onSaved?: EditorProps["onSaved"];
@@ -42,7 +50,7 @@ export interface EditorInstance {
   save(): Promise<boolean>;
   open(path: string): Promise<void>;
   currentPath(): string | null;
-  /** Changes options after mounting, e.g. the theme or read-only. Passing a new backend reloads. */
+  /** Changes options after mounting, e.g. the theme, the locale or read-only. Passing a new backend reloads. */
   update(options: Partial<MountOptions>): void;
   unmount(): void;
 }
@@ -75,6 +83,9 @@ export function mount(element: HTMLElement, options: MountOptions): EditorInstan
           readOnly={current.readOnly}
           theme={current.theme ?? "light"}
           themeVars={current.themeVars}
+          locale={current.locale}
+          messages={current.messages}
+          columnLabels={current.columnLabels}
           onDirtyChange={current.onDirtyChange}
           onFileChange={current.onFileChange}
           onSaved={current.onSaved}

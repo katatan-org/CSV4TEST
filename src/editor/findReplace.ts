@@ -13,14 +13,14 @@ export interface Match {
   col: number;
 }
 
-/** Builds the search pattern, or an error message for an invalid regex. */
+/** Builds the search pattern, or the error detail (from the regex engine, not translated) for an invalid regex. */
 export function buildPattern(query: string, opts: FindOptions): RegExp | string {
-  if (query === "") return "検索語が空です";
+  if (query === "") return "empty query";
   const source = opts.regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   try {
     return new RegExp(source, opts.caseSensitive ? "g" : "gi");
   } catch (e) {
-    return `正規表現が不正です: ${(e as Error).message}`;
+    return (e as Error).message;
   }
 }
 

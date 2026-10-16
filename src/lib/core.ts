@@ -12,5 +12,8 @@ export type { CsvField, CsvRecord, CsvLayout, ParsedCsv } from "../csv/types";
 export { computeChanges, columnMapping, type RecordChange, type CellChange, type ChangeSummary } from "../editor/changes";
 export { resolveRules, headersOf, findColumn, parseRuleOverride, type ResolvedRules, type RuleOverride } from "../rules/detect";
 export { analyze, type Issue, type AnalyzeOptions } from "../rules/analysis";
+export { ja } from "../i18n/ja";
+export { en } from "../i18n/en";
+export type { Locale, Messages } from "../i18n/types";
 export { cellLines } from "../rules/tokens";
 export type { RuleSet, ResolvedColumn } from "../rules/schema";

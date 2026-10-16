@@ -1,4 +1,4 @@
-import { dirOf, joinPath, resolvePath, type StorageBackend } from "../storage/types";
+import { dirOf, joinPath, resolvePath, StorageError, type StorageBackend } from "../storage/types";
 
 export type ImageStatus = "loading" | "ok" | "missing" | "unavailable";
 
@@ -87,7 +87,7 @@ export class ImageStore {
    * returns the path to write in the cell (relative to the CSV).
    */
   async add(file: Blob & { name?: string }, assetsDir: string, baseName: string): Promise<string> {
-    if (!this.writable || !this.backend.addAsset) throw new Error("このファイルには画像を追加できません");
+    if (!this.writable || !this.backend.addAsset) throw new StorageError("images_unavailable", "Images cannot be added to this file");
     const full = await this.backend.addAsset(joinPath(this.baseDir, assetsDir), baseName, file);
     const relative = this.baseDir && full.startsWith(`${this.baseDir}/`) ? full.slice(this.baseDir.length + 1) : full;
     this.cache.delete(relative);

@@ -234,7 +234,7 @@ function drawImages(
     } else {
       ctx.font = TEXT_STYLE.font;
       ctx.fillStyle = entry.status === "missing" ? ui.linkBroken : ui.textMuted;
-      const label = entry.status === "loading" ? "読み込み中…" : entry.status === "missing" ? "見つかりません" : "フォルダを開くと表示";
+      const label = entry.status === "loading" ? view.m.imageLoading : entry.status === "missing" ? view.m.imageMissing : view.m.imageNeedsFolder;
       ctx.fillText(label, x + 8, y + t.h / 2 - 9, t.w - 16);
       ctx.font = TEXT_STYLE.monoFont;
       ctx.fillText(t.path, x + 8, y + t.h / 2 + 10, t.w - 16);
@@ -254,7 +254,7 @@ function drawImages(
     ctx.setLineDash([]);
     ctx.font = `12px ${TEXT_STYLE.font.split("px ")[1]}`;
     ctx.fillStyle = hot ? ui.accent : ui.textMuted;
-    ctx.fillText("＋ 画像を追加", ox + a.x + 10, oy + a.y + a.h / 2 + 0.5);
+    ctx.fillText(view.m.addImageButton, ox + a.x + 10, oy + a.y + a.h / 2 + 0.5);
   }
 }
 
@@ -393,8 +393,8 @@ function makeEditor(viewRef: ViewRef): ProvideEditorComponent<RichCell> {
 
     const width = Math.max(target.width, column?.rule.wrap ? 320 : 200);
     const hint = useMemo(
-      () => (column?.rule.display === "labels" ? "1行に1ラベル" : column?.rule.display === "images" ? "1行に1パス" : null),
-      [column],
+      () => (column?.rule.display === "labels" ? view.m.hintLabels : column?.rule.display === "images" ? view.m.hintImages : null),
+      [column, view.m],
     );
 
     return (
@@ -409,10 +409,10 @@ function makeEditor(viewRef: ViewRef): ProvideEditorComponent<RichCell> {
           onClick={(e) => setCompletion(findCompletion(text, e.currentTarget.selectionStart))}
         />
         <div className="cell-editor-hint">
-          <span>Enter 確定</span>
-          <span>Alt+Enter 改行</span>
-          <span>Esc 取消</span>
-          {view.features.variables && <span>{"{{"} で変数補完</span>}
+          <span>{view.m.editorEnter}</span>
+          <span>{view.m.editorNewline}</span>
+          <span>{view.m.editorEscape}</span>
+          {view.features.variables && <span>{view.m.editorComplete}</span>}
           {hint && <span>{hint}</span>}
         </div>
         {completion && (
