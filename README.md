@@ -28,6 +28,7 @@ npm run build      # dist/ に静的ファイルを出力（サーバー不要�
 | 行の追加 | 最終行より下の空白セルにそのまま入力できます。間の空白行は空の行（区切り文字だけ）として保存します |
 | 変更の確認 | サイドパネルの「変更」タブで、保存前にセル単位の差分を見られます |
 | ヘルプ | F1（またはツールバーの ? ）で挙動の説明、? キー（またはキーボードのアイコン）でショートカット一覧 |
+| 表示言語 | 日本語と英語。初めはブラウザの言語に合わせ、ツールバーの「English」/「日本語」で切り替えます（次回も同じ言語で開きます） |
 
 アプリを開いている間に `git pull` や `git checkout` でファイルが変わると、自動で再読み込みします（未保存の変更がある場合は確認します）。
 
@@ -74,7 +75,7 @@ KATATAN 以外の CSV は汎用ルールで表示します。数値は右寄せ�
 
 ```bash
 npm test           # 単体テスト（ロスレスな往復変換、git diff で1行だけ変わることの確認を含む）
-npm run e2e        # Chrome での E2E テスト（OPFS 上のフォルダで開く → 編集 → 保存まで、ライブラリとしての組み込み）
+npm run e2e        # Chrome での E2E テスト（OPFS 上のフォルダで開く → 編集 → 保存まで、ライブラリとしての組み込み、日本語と英語の表示）
 npm run typecheck
 npm run build:lib  # ライブラリ @katatan/csv4test を dist-lib/ に出力（docs/library-integration.md）
 ```
@@ -87,6 +88,7 @@ npm run build:lib  # ライブラリ @katatan/csv4test を dist-lib/ に出力�
 - `src/ui/` — Glide Data Grid のカスタムセル（Canvas 描画）とエディター、パネル類
 - `src/fs/` — File System Access API の低レベルな関数、画像の読み込み
 - `src/storage/` — ファイルの読み書きの抽象（`StorageBackend`）と、フォルダ・単一ファイル・メモリ上の実装
+- `src/i18n/` — UI の文言のカタログ（`ja.ts` が元、`en.ts`）と、言語ごとのヘルプ（`help.*.tsx`）
 - `src/Editor.tsx` — 編集画面（backend を受け取る。単体アプリとライブラリで共通）
 - `src/App.tsx` — 単体アプリの外枠（フォルダやファイルを開く、ようこそ画面、ドラッグ＆ドロップ）
 - `src/lib/` — ライブラリの入口（`mount`、`core`）

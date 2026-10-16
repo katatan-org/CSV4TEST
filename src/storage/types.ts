@@ -87,6 +87,11 @@ export type SaveResult =
         /** Records someone else changed, with their current values by header. */
         records?: { id: number; current?: Record<string, string> }[];
         message?: string;
+        /**
+         * Why, when there is no `message`: "modified_externally" (the file changed
+         * outside the editor) is shown as such; otherwise "someone else changed it first".
+         */
+        code?: "modified_externally";
       };
     }
   | { ok: false; error: { code: string; message: string; status?: number } };
@@ -127,9 +132,32 @@ export interface StorageBackend {
   dispose?(): void;
 }
 
-export class NotFoundError extends Error {
+export type StorageErrorCode =
+  | "not_found"
+  | "permission_denied"
+  | "create_folder_failed"
+  | "no_folder_picker"
+  | "no_file_picker"
+  | "images_unavailable";
+
+/**
+ * An error of the built-in storage. The editor shows it in the UI language
+ * by `code` (see i18n `errorText`); `message` is the English text.
+ */
+export class StorageError extends Error {
+  constructor(
+    readonly code: StorageErrorCode,
+    message: string,
+    readonly params: { path?: string } = {},
+  ) {
+    super(message);
+    this.name = "StorageError";
+  }
+}
+
+export class NotFoundError extends StorageError {
   constructor(path: string) {
-    super(`${path} が見つかりません`);
+    super("not_found", `${path} was not found`, { path });
     this.name = "NotFoundError";
   }
 }

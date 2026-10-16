@@ -15,14 +15,15 @@ export interface EditorState {
 export type EditorAction =
   | { type: "load"; doc: CsvDoc }
   | { type: "apply"; label: string; update: (doc: CsvDoc) => CsvDoc }
-  | { type: "undo" }
-  | { type: "redo" }
+  /** `label` is shown as the last action (in the UI language). */
+  | { type: "undo"; label?: string }
+  | { type: "redo"; label?: string }
   /**
    * A save finished. `doc` is the snapshot that was written (edits made while
    * saving stay unsaved); `assigned` are values the backend filled in, which
    * become part of the saved baseline.
    */
-  | { type: "saved"; doc?: CsvDoc; assigned?: CellEdit[] };
+  | { type: "saved"; doc?: CsvDoc; assigned?: CellEdit[]; label?: string };
 
 const LIMIT = 300;
 
@@ -44,12 +45,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "undo": {
       if (state.past.length === 0) return state;
       const doc = state.past[state.past.length - 1];
-      return { doc, past: state.past.slice(0, -1), future: [state.doc, ...state.future], lastAction: "元に戻す" };
+      return { doc, past: state.past.slice(0, -1), future: [state.doc, ...state.future], lastAction: action.label };
     }
     case "redo": {
       if (state.future.length === 0) return state;
       const [doc, ...future] = state.future;
-      return { doc, past: [...state.past, state.doc], future, lastAction: "やり直す" };
+      return { doc, past: [...state.past, state.doc], future, lastAction: action.label };
     }
     case "saved": {
       const snapshot = action.doc ?? state.doc;
@@ -70,7 +71,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         return r !== undefined && r !== saved.originals.get(e.recordId);
       });
       if (late.length > 0) doc = setCells(doc, late);
-      return { doc, past: state.past.map(rebase), future: state.future.map(rebase), lastAction: "保存しました" };
+      return { doc, past: state.past.map(rebase), future: state.future.map(rebase), lastAction: action.label };
     }
   }
 }

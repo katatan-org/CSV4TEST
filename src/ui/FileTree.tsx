@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useI18n } from "../i18n";
 import { Icon } from "./icons";
 
 export interface TreeNode {
@@ -47,14 +48,15 @@ export function FileTree({
   onOpen: (path: string) => void;
   onRefresh: () => void;
 }) {
+  const { m } = useI18n();
   return (
-    <nav className="file-tree" aria-label="CSVファイル">
+    <nav className="file-tree" aria-label={m.csvFiles}>
       <header>
         <Icon name="folder" />
         <span className="file-tree-root" title={tree.name}>
           {tree.name}
         </span>
-        <button className="icon-button" onClick={onRefresh} title="再読み込み" aria-label="フォルダを再読み込み">
+        <button className="icon-button" onClick={onRefresh} title={m.reload} aria-label={m.reloadFolder}>
           <Icon name="refresh" size={14} />
         </button>
       </header>
@@ -65,7 +67,7 @@ export function FileTree({
           ))}
         </ul>
       ) : (
-        <p className="empty">CSVファイルが見つかりません</p>
+        <p className="empty">{m.noCsvFiles}</p>
       )}
     </nav>
   );
@@ -85,6 +87,7 @@ function Node({
   depth: number;
 }) {
   const [open, setOpen] = useState(depth < 2 || (activePath?.startsWith(node.path + "/") ?? false));
+  const { m } = useI18n();
   const pad = { paddingLeft: 8 + depth * 14 };
   if (node.kind === "dir") {
     return (
@@ -115,7 +118,7 @@ function Node({
       >
         <Icon name="file" size={13} />
         <span>{node.name}</span>
-        {active && dirty && <span className="dirty-dot" aria-label="未保存" />}
+        {active && dirty && <span className="dirty-dot" aria-label={m.unsaved} />}
       </button>
     </li>
   );

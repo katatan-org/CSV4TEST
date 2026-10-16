@@ -123,6 +123,9 @@ const editor = mount(container, {
   readOnly: false,
   theme: "light",                  // "light" | "dark"
   themeVars: { "--accent": "#0f766e", "--font": "..." },
+  locale: "ja",                    // "ja" | "en"（省略時 "ja"）
+  messages: { save: "保存する" },   // 個別の文言の上書き（下の「UIの言語」）
+  columnLabels: { "Test Subject": "テスト項目名" }, // 列見出しの表示名（CSV の見出しは変えない）
   onDirtyChange(dirty) {},
   onFileChange(path) {},
   onSaved(result) {},
@@ -134,20 +137,30 @@ await editor.save();               // 保存されなかったら false（キャ
 await editor.open("tests/other.csv");
 editor.currentPath();
 editor.update({ theme: "dark" });  // あとから設定を変える（backend を渡し直すと読み込み直す）
+editor.update({ locale: "en" });   // 表示中でも言語を切り替えられる
 editor.unmount();
 ```
 
 `container` には高さを指定しておくこと（エディタはその高さいっぱいに広がる）。CSSは初回の `mount` で `<style id="csv4test-styles">` として自動で差し込まれるので、組み込み先でCSSファイルを読み込む必要はない。
 
+## UIの言語
+
+- 文言は `src/i18n/` のカタログにある。`ja.ts` が元で、`en.ts` は `Messages` 型で書いているので、キーの漏れや余分なキーは型エラーになる。長い説明（ヘルプ、ショートカット一覧、ようこそ画面の箇条書き）は `help.ja.tsx` / `help.en.tsx` に言語ごとに分けている。
+- パラメーターのある文言は、1つのオブジェクトを受け取る関数（例 `savedPath: ({ path }) => ...`）。paraglide のメッセージ関数と同じ形なので、組み込み先は `messages: { savedPath: m.csv4test_saved_path }` のように自分の文言をそのまま渡せる。`messages` に渡さなかったキーは、`locale` のカタログの文言になる。
+- `columnLabels` は、列見出しの表示名だけを変える（グリッドの見出し、検索の列、サイドパネル、絞り込みの表示）。キーは CSV の見出しで、大文字・小文字と空白の違いは無視する。保存する CSV の見出しと、`ChangeSet.records.headers` は元のまま。
+- 数値（件数、行数）は `locale` の書式で表示する。日付を表示する箇所は今はない。
+- 組み込みの backend（`FsAccessBackend` など）のエラーは `StorageError`（`code` 付き）で、エディタが表示の言語に訳す。組み込み先の backend が返す `message` は、そのまま表示する（組み込み先の言語で返すこと）。`SaveResult` の `conflict` に `message` がないときは、`code: "modified_externally"` なら「ファイルが外部で変更されています」、それ以外は「ほかの人が先に変更しています」と表示する。
+- `@katatan/csv4test/core` の `analyze` は、`messages` オプションで検証のメッセージの言語を選べる（例 `analyze(doc, rules, { messages: en })`。省略時は日本語）。
+
 ## 組み込み時の制約
 
 - **キーボードショートカット**: エディタの中にフォーカスがあるときだけ効く（`window` には登録しない）。Ctrl+S、Ctrl+F、Ctrl+Z、F1、? も同じ。
 - **CSS**: すべてのルールを `.c4t` の配下に限定している。組み込み先のページのスタイルは変えない。`html`、`body` のルールは単体アプリ用の `app.css` に分けており、ライブラリには含まれない。
-- **ページ全体の状態**: `document.title` と `beforeunload` は触らない。未保存の確認は、`isDirty()` と `onDirtyChange` を使って組み込み先が行う。`localStorage` のキーは `csv4test:` で始まるものだけを使う（列の幅、サイドパネルの開閉）。
+- **ページ全体の状態**: `document.title` と `beforeunload` は触らない。未保存の確認は、`isDirty()` と `onDirtyChange` を使って組み込み先が行う。`localStorage` のキーは `csv4test:` で始まるものだけを使う（列の幅、サイドパネルの開閉）。表示言語は `locale` で受け取り、`document.documentElement.lang` は変えない（エディタのルート要素に `lang` を付ける）。
 - **セルのエディタ**: Glide Data Grid はセルを編集するときのエディタを `#portal` に描画する。なければエディタが `body` の末尾に作り、`.c4t` のスタイルとテーマを付ける。
 - **テーマ**: `theme` でライト／ダークを切り替える。`themeVars` で CSS 変数（`--bg`、`--text`、`--accent`、`--border`、`--font` など。一覧は `src/styles.css` の先頭）を上書きできる。グリッドは Canvas で描画するため、CSS 変数のうち `--accent` と `--font` だけをグリッドにも反映する。
-- **単体アプリ専用のUI**: 「フォルダを開く」「ファイル」、ようこそ画面、ウィンドウへのドラッグ＆ドロップ、テーマの切り替えボタン、Ctrl+O は単体アプリ（`src/App.tsx`）にだけある。
-- **未対応**: UIの文言の差し替え（`messages`）はまだできない（文言は日本語のみ）。同じページに2つのエディタを置くと、`#portal` のテーマは最後に描画したエディタのものになる。
+- **単体アプリ専用のUI**: 「フォルダを開く」「ファイル」、ようこそ画面、ウィンドウへのドラッグ＆ドロップ、テーマと言語の切り替えボタン、Ctrl+O は単体アプリ（`src/App.tsx`）にだけある。
+- **未対応**: 同じページに2つのエディタを置くと、`#portal` のテーマは最後に描画したエディタのものになる。
 
 ## パッケージ
 
@@ -167,7 +180,7 @@ editor.unmount();
 ## 開発
 
 - `embed.html`（開発サーバー専用）は、React を使わないページから `mount()` で組み込むテスト用のホスト。`npm run dev` で `http://localhost:5173/embed.html` を開き、コンソールで `__embed.mount({ "a.csv": "No,Test Subject\n1,x\n" }, { tree: true })` のように試せる。
-- E2E テスト `e2e/embed.spec.ts` が、組み込み時の動作（backend 経由の保存、ショートカットの範囲、組み込み先のスタイル、読み取り専用の列、自動保存、コミットメッセージ、競合）を確認する。
+- E2E テスト `e2e/embed.spec.ts` が、組み込み時の動作（backend 経由の保存、ショートカットの範囲、組み込み先のスタイル、読み取り専用の列、自動保存、コミットメッセージ、競合）を確認する。`e2e/i18n.spec.ts` が、`locale` と `update({ locale })`、`messages`、`columnLabels` を確認する。
 
 ## 検証
 

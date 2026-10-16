@@ -1,6 +1,8 @@
 import { cellValue, type CsvDoc } from "../csv/document";
 import type { CsvRecord } from "../csv/types";
 import { findColumn, type ResolvedRules } from "./detect";
+import { ja } from "../i18n/ja";
+import type { Messages } from "../i18n/types";
 import { cellLines, hasUnclosedVariable, tokenize, variablesIn } from "./tokens";
 
 export interface Issue {
@@ -28,11 +30,13 @@ export interface Analysis {
 export interface AnalyzeOptions {
   /** Defined variable names (from the backend). When set, other `{{name}}`s are reported. */
   knownVariables?: ReadonlySet<string>;
+  /** Messages for the issues (default: Japanese). */
+  messages?: Pick<Messages, "issueIdEmpty" | "issueIdNotNumber" | "issueIdDuplicate" | "issueBrokenRef" | "issueUnclosedVariable" | "issueUndefinedVariable">;
 }
 
 /** Content checks driven by the rule set's features. Pure and synchronous. */
 export function analyze(doc: CsvDoc, rules: ResolvedRules, options: AnalyzeOptions = {}): Analysis {
-  const { knownVariables } = options;
+  const { knownVariables, messages: m = ja } = options;
   const { features = {} } = rules.ruleSet;
   const rows = doc.records.slice(1);
   const issues: Issue[] = [];
@@ -43,14 +47,14 @@ export function analyze(doc: CsvDoc, rules: ResolvedRules, options: AnalyzeOptio
     for (const r of rows) {
       const id = cellValue(r, idCol.index).trim();
       if (id === "") {
-        issues.push({ severity: "warning", recordId: r.id, col: idCol.index, message: `${idCol.header} が空です` });
+        issues.push({ severity: "warning", recordId: r.id, col: idCol.index, message: m.issueIdEmpty({ column: idCol.header }) });
         continue;
       }
       if (!/^\d+$/.test(id)) {
-        issues.push({ severity: "warning", recordId: r.id, col: idCol.index, message: `${idCol.header} が数値ではありません: ${id}` });
+        issues.push({ severity: "warning", recordId: r.id, col: idCol.index, message: m.issueIdNotNumber({ column: idCol.header, id }) });
       }
       if (idToRecord.has(id)) {
-        issues.push({ severity: "error", recordId: r.id, col: idCol.index, message: `${idCol.header} ${id} が重複しています` });
+        issues.push({ severity: "error", recordId: r.id, col: idCol.index, message: m.issueIdDuplicate({ column: idCol.header, id }) });
       } else {
         idToRecord.set(id, r.id);
       }
@@ -64,7 +68,7 @@ export function analyze(doc: CsvDoc, rules: ResolvedRules, options: AnalyzeOptio
       for (const c of textCols) {
         for (const t of tokenize(cellValue(r, c.index), true, caseRef)) {
           if (t.kind === "caseRef" && t.ref && !idToRecord.has(t.ref)) {
-            issues.push({ severity: "warning", recordId: r.id, col: c.index, message: `${t.text} は存在しません` });
+            issues.push({ severity: "warning", recordId: r.id, col: c.index, message: m.issueBrokenRef({ ref: t.text }) });
           }
         }
       }
@@ -77,11 +81,11 @@ export function analyze(doc: CsvDoc, rules: ResolvedRules, options: AnalyzeOptio
       for (const c of textCols) {
         const v = cellValue(r, c.index);
         if (hasUnclosedVariable(v)) {
-          issues.push({ severity: "warning", recordId: r.id, col: c.index, message: "{{ が閉じられていません" });
+          issues.push({ severity: "warning", recordId: r.id, col: c.index, message: m.issueUnclosedVariable });
         }
         for (const name of variablesIn(v)) {
           if (knownVariables && !knownVariables.has(name)) {
-            issues.push({ severity: "warning", recordId: r.id, col: c.index, message: `{{${name}}} は定義されていません` });
+            issues.push({ severity: "warning", recordId: r.id, col: c.index, message: m.issueUndefinedVariable({ name }) });
           }
           const use = variables.get(name) ?? { name, count: 0, recordIds: [] };
           use.count++;

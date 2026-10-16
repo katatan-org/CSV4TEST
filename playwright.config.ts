@@ -11,6 +11,8 @@ export default defineConfig({
     baseURL: "http://localhost:5179",
     channel: "chrome",
     viewport: { width: 1600, height: 900 },
+    // The standalone app picks its language from the browser; the tests are written against the Japanese UI.
+    locale: "ja-JP",
   },
   webServer: {
     command: "npx vite --port 5179 --strictPort",

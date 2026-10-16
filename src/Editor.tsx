@@ -23,6 +23,7 @@ import type { Match } from "./editor/findReplace";
 import { editorReducer, initialEditorState } from "./editor/history";
 import { computeViewRows, EMPTY_VIEW, isViewFiltered, sortSnapshot, type ViewOptions } from "./editor/viewRows";
 import { pickImagesByInput } from "./fs/fallback";
+import { createI18n, errorText, I18nProvider, type Locale, type Messages } from "./i18n";
 import { assetsDirFor, ImageStore } from "./fs/imageStore";
 import { analyze, nextId, referencedImages, type Issue } from "./rules/analysis";
 import { findColumn, headersOf, parseRuleOverride, resolveRules, type RuleOverride } from "./rules/detect";
@@ -55,6 +56,15 @@ export interface EditorProps {
    * `--accent` and `--font` also apply to the grid canvas.
    */
   themeVars?: Record<string, string>;
+  /** UI language (default "ja"). */
+  locale?: Locale;
+  /** Overrides for single UI messages of the locale's catalog. */
+  messages?: Partial<Messages>;
+  /**
+   * Names shown for column headers, by header (case and spaces ignored), e.g.
+   * { "Test Subject": "テスト項目名" }. Only the display changes; the CSV keeps its headers.
+   */
+  columnLabels?: Record<string, string>;
   /**
    * Embedded in another page: shortcuts only work while focus is inside the
    * editor, and nothing on the page (title, unload prompt) is touched.
@@ -65,6 +75,8 @@ export interface EditorProps {
   /** Shown instead of the grid when there is no backend. */
   emptyState?: ReactNode;
   onToggleTheme?(): void;
+  /** Shows a language switch in the toolbar (standalone app). */
+  onToggleLocale?(): void;
   onDirtyChange?(dirty: boolean): void;
   onFileChange?(path: string | null): void;
   onSaved?(result: Extract<SaveResult, { ok: true }>): void;
@@ -135,6 +147,9 @@ let toastCounter = 0;
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(props, ref) {
   const { backend, theme: mode, embedded = false } = props;
+  const locale = props.locale ?? "ja";
+  const i18n = useMemo(() => createI18n(locale, props.messages), [locale, props.messages]);
+  const { m } = i18n;
   const caps = backend?.capabilities;
   const [entries, setEntries] = useState<TreeEntry[] | null>(null);
   const [file, setFileState] = useState<OpenFile | null>(null);
@@ -177,6 +192,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   backendRef.current = backend;
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
+  const mRef = useRef(m);
+  mRef.current = m;
   const themeVarsRef = useRef(props.themeVars);
   themeVarsRef.current = props.themeVars;
 
@@ -216,6 +233,16 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   );
   const features = rules.ruleSet.features ?? {};
   const headers = useMemo(() => headersOf(doc), [headerRecord, width]); // eslint-disable-line react-hooks/exhaustive-deps
+  const columnLabels = useMemo(
+    () => new Map(Object.entries(props.columnLabels ?? {}).map(([header, label]) => [normalizeHeader(header), label])),
+    [props.columnLabels],
+  );
+  /** The name shown for a column: the host's label for its header, the header, or "Column N" when it is empty. */
+  const columnLabel = useCallback(
+    (header: string, col: number) => columnLabels.get(normalizeHeader(header)) ?? (header !== "" ? header : col >= 0 ? m.columnN({ n: col + 1 }) : m.emptyValue),
+    [columnLabels, m],
+  );
+  const headerLabels = useMemo(() => headers.map((h, i) => columnLabel(h, i)), [headers, columnLabel]);
   const knownVariables = useMemo(() => (backendVariables ? new Set(backendVariables.map((v) => v.name)) : undefined), [backendVariables]);
   const variableValues = useMemo(() => {
     const map = new Map<string, string>();
@@ -226,7 +253,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     () => (backendVariables ? new Map(backendVariables.map((v) => [v.name, v.value])) : undefined),
     [backendVariables],
   );
-  const analysis = useMemo(() => analyze(doc, rules, { knownVariables }), [doc, rules, knownVariables]);
+  const analysis = useMemo(() => analyze(doc, rules, { knownVariables, messages: m }), [doc, rules, knownVariables, m]);
   const rows = useMemo(() => computeViewRows(doc.records, view), [doc.records, view]);
   const changes = useMemo(() => computeChanges(doc), [doc]);
   const columnMap = useMemo(() => columnMapping(doc), [doc]);
@@ -287,7 +314,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         for (const p of cellLines(cellValue(r, imagesCol.index))) {
           if (/^https?:/i.test(p)) continue;
           if (imageStore.get(p).status === "missing") {
-            issues.push({ severity: "warning", recordId: r.id, col: imagesCol.index, message: `画像が見つかりません: ${p}` });
+            issues.push({ severity: "warning", recordId: r.id, col: imagesCol.index, message: m.imageNotFound({ path: p }) });
           }
         }
       }
@@ -298,13 +325,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         for (const e of entries) {
           if (!e.path.startsWith(`${assetsDir}/`) || baseName(e.path).startsWith(".")) continue;
           const relative = dir ? e.path.slice(dir.length + 1) : e.path;
-          if (!referenced.has(relative)) issues.push({ severity: "warning", message: `どの行からも参照されていない画像: ${relative}` });
+          if (!referenced.has(relative)) issues.push({ severity: "warning", message: m.imageUnreferenced({ path: relative }) });
         }
       }
       setImageIssues(issues);
     }, 600);
     return () => clearTimeout(t);
-  }, [doc.records, imageStore, imagesCol, file, entries, imageTick, features.images?.assetsDir]);
+  }, [doc.records, imageStore, imagesCol, file, entries, imageTick, features.images?.assetsDir, m]);
 
   const issues = useMemo(() => [...analysis.issues, ...imageIssues], [analysis.issues, imageIssues]);
 
@@ -317,7 +344,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   const apply = useCallback(
     (label: string, update: (d: CsvDoc) => CsvDoc) => {
       if (readOnly) {
-        toast("このファイルは読み取り専用です", "error");
+        toast(m.readOnlyFile, "error");
         return;
       }
       if (readOnlyCols.size > 0 || fixedColumns) {
@@ -325,7 +352,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         const after = update(before);
         if (after === before) return;
         if (fixedColumns && (columnCount(after) !== columnCount(before) || (after.records[0] && before.records[0] && after.records[0] !== before.records[0]))) {
-          toast("このファイルでは列の構成を変更できません", "error");
+          toast(m.fixedColumns, "error");
           return;
         }
         if (readOnlyCols.size > 0) {
@@ -335,15 +362,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
             return old !== undefined && old !== r && [...readOnlyCols].some((c) => cellValue(old, c) !== cellValue(r, c));
           });
           if (touched) {
-            const names = [...readOnlyCols].map((c) => rules.columns[c]?.header).join(", ");
-            toast(`${names} 列は編集できません`, "error");
+            const names = [...readOnlyCols].map((c) => columnLabel(rules.columns[c]?.header ?? "", c)).join(m.listSeparator);
+            toast(m.readOnlyColumns({ columns: names }), "error");
             return;
           }
         }
       }
       dispatch({ type: "apply", label, update });
     },
-    [readOnly, readOnlyCols, fixedColumns, rules.columns, toast],
+    [readOnly, readOnlyCols, fixedColumns, rules.columns, toast, m, columnLabel],
   );
 
   // ---- Navigation ----------------------------------------------------------------------
@@ -389,9 +416,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         const id = cellValue(doc.records[index], idCol.index);
         if (id) return rules.columns[idCol.index].rule.format?.replace("{value}", id) ?? id;
       }
-      return index > 0 ? `${index}行目` : "（削除済み）";
+      return index > 0 ? m.rowN({ n: index }) : m.deletedRecord;
     },
-    [doc.records, idCol, rules.columns],
+    [doc.records, idCol, rules.columns, m],
   );
 
   // ---- Row / column operations -------------------------------------------------------
@@ -421,19 +448,19 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
 
   const insertRowsAt = useCallback(
     (anchorRecordId: number | null, below: boolean, count = 1) => {
-      apply(count > 1 ? `${count}行を挿入` : "行を挿入", (d) => {
+      apply(m.insertRows({ count }), (d) => {
         const at = anchorRecordId === null ? d.records.length : d.records.findIndex((r) => r.id === anchorRecordId) + (below ? 1 : 0);
         const blank = Array.from({ length: count }, () => Array<string>(columnCount(d)).fill(""));
         return insertRecords(d, Math.max(1, at), prepareNewRows(d, blank)).doc;
       });
     },
-    [apply, prepareNewRows],
+    [apply, prepareNewRows, m],
   );
 
   const duplicateRows = useCallback(
     (ids: number[]) => {
       if (ids.length === 0) return;
-      apply(`${ids.length}行を複製`, (d) => {
+      apply(m.duplicateRows({ count: ids.length }), (d) => {
         const set = new Set(ids);
         const source = d.records.filter((r) => set.has(r.id));
         const last = d.records.findIndex((r) => r.id === source[source.length - 1].id);
@@ -445,45 +472,45 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         return insertRecords(d, last + 1, prepareNewRows(d, copies)).doc;
       });
     },
-    [apply, idCol, prepareNewRows],
+    [apply, idCol, prepareNewRows, m],
   );
 
   const deleteRows = useCallback(
     (ids: number[]) => {
       if (ids.length === 0) return;
-      apply(`${ids.length}行を削除`, (d) => deleteRecords(d, ids));
+      apply(m.deleteRows({ count: ids.length }), (d) => deleteRecords(d, ids));
       setSelection(emptySelection);
     },
-    [apply],
+    [apply, m],
   );
 
   const moveRow = useCallback(
     (from: number, to: number) => {
       const record = rows[from];
       if (!record || filtered || view.sortOrder) return;
-      apply("行を移動", (d) => moveRecords(d, [record.id], to + 1));
+      apply(m.moveRow, (d) => moveRecords(d, [record.id], to + 1));
       // Glide leaves the row number it was dragged from selected; follow the moved row instead.
       setSelection({ ...emptySelection, rows: CompactSelection.fromSingleSelection(to) });
     },
-    [rows, filtered, view.sortOrder, apply],
+    [rows, filtered, view.sortOrder, apply, m],
   );
 
   const addColumn = useCallback(
     async (at: number) => {
-      const name = await ask("列を挿入", "列名", "", "挿入");
+      const name = await ask(m.insertColumnTitle, m.columnNameLabel, "", m.insertConfirm);
       if (name === null) return;
-      apply(`列「${name}」を挿入`, (d) => insertColumn(d, at, name));
+      apply(m.insertColumnAction({ name }), (d) => insertColumn(d, at, name));
     },
-    [ask, apply],
+    [ask, apply, m],
   );
 
   const addOptionalColumn = useCallback(
     (name: string) => {
       const def = features.optionalColumns?.find((c) => c.name === name);
       const after = findColumn(rules.columns, def?.after);
-      apply(`${name}列を追加`, (d) => insertColumn(d, after ? after.index + 1 : columnCount(d), name));
+      apply(m.addOptionalColumn({ name }), (d) => insertColumn(d, after ? after.index + 1 : columnCount(d), name));
     },
-    [features.optionalColumns, rules.columns, apply],
+    [features.optionalColumns, rules.columns, apply, m],
   );
 
   const missingOptional = useMemo(
@@ -507,48 +534,48 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   const filterColumn = useCallback(
     async (col: number) => {
       const current = view.filters.find((f) => f.col === col)?.text ?? "";
-      const text = await ask(`「${headers[col] || `列 ${col + 1}`}」で絞り込み`, "含む文字列（空欄で解除）", current, "絞り込む");
+      const text = await ask(m.filterTitle({ column: headerLabels[col] }), m.filterLabel, current, m.filterConfirm);
       if (text === null) return;
       setView((v) => ({ ...v, filters: [...v.filters.filter((f) => f.col !== col), { col, text }] }));
     },
-    [view.filters, headers, ask],
+    [view.filters, headerLabels, ask, m],
   );
 
   const openHeaderMenu = useCallback(
     (col: number, bounds: Rectangle) => {
-      const name = headers[col] || `列 ${col + 1}`;
+      const name = headerLabels[col];
       const hasFilter = view.filters.some((f) => f.col === col && f.text !== "");
       const canEditColumns = !readOnly && !fixedColumns;
       setMenu({
         x: bounds.x,
         y: bounds.y + bounds.height,
         items: [
-          { label: "昇順で並べ替え（表示のみ）", onClick: () => sortBy(col, false), checked: sortInfo?.col === col && !sortInfo.desc },
-          { label: "降順で並べ替え（表示のみ）", onClick: () => sortBy(col, true), checked: sortInfo?.col === col && sortInfo.desc },
-          { label: "並べ替えを解除（ファイルの順序）", onClick: clearSort, disabled: !sortInfo },
+          { label: m.sortAsc, onClick: () => sortBy(col, false), checked: sortInfo?.col === col && !sortInfo.desc },
+          { label: m.sortDesc, onClick: () => sortBy(col, true), checked: sortInfo?.col === col && sortInfo.desc },
+          { label: m.sortClear, onClick: clearSort, disabled: !sortInfo },
           "separator",
-          { label: hasFilter ? "絞り込み条件を変更…" : "この列で絞り込み…", onClick: () => void filterColumn(col), checked: hasFilter },
+          { label: hasFilter ? m.filterEdit : m.filterByColumn, onClick: () => void filterColumn(col), checked: hasFilter },
           ...(hasFilter
-            ? [{ label: "この列の絞り込みを解除", onClick: () => setView((v) => ({ ...v, filters: v.filters.filter((f) => f.col !== col) })) }]
+            ? [{ label: m.filterClearColumn, onClick: () => setView((v) => ({ ...v, filters: v.filters.filter((f) => f.col !== col) })) }]
             : []),
           ...(canEditColumns
             ? ([
                 "separator",
-                { label: "左に列を挿入…", onClick: () => void addColumn(col) },
-                { label: "右に列を挿入…", onClick: () => void addColumn(col + 1) },
+                { label: `${m.insertColumnLeft}…`, onClick: () => void addColumn(col) },
+                { label: `${m.insertColumnRight}…`, onClick: () => void addColumn(col + 1) },
                 {
-                  label: "列名を変更…",
+                  label: `${m.renameColumn}…`,
                   onClick: async () => {
-                    const v = await ask("列名を変更", "新しい列名", headers[col], "変更");
-                    if (v !== null && headerRecord) apply("列名を変更", (d) => setCells(d, [{ recordId: d.records[0].id, col, value: v }]));
+                    const v = await ask(m.renameColumn, m.newColumnName, headers[col], m.renameConfirm);
+                    if (v !== null && headerRecord) apply(m.renameColumn, (d) => setCells(d, [{ recordId: d.records[0].id, col, value: v }]));
                   },
                 },
                 "separator",
                 {
-                  label: `列「${name}」を削除`,
+                  label: m.deleteColumn({ name }),
                   danger: true,
                   onClick: () => {
-                    if (window.confirm(`列「${name}」を削除しますか？（元に戻すで復元できます）`)) apply(`列「${name}」を削除`, (d) => deleteColumn(d, col));
+                    if (window.confirm(m.confirmDeleteColumn({ name }))) apply(m.deleteColumn({ name }), (d) => deleteColumn(d, col));
                   },
                 },
               ] as MenuItem[])
@@ -556,7 +583,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         ],
       });
     },
-    [headers, view.filters, sortInfo, sortBy, clearSort, filterColumn, addColumn, ask, apply, headerRecord, readOnly, fixedColumns],
+    [headers, headerLabels, view.filters, sortInfo, sortBy, clearSort, filterColumn, addColumn, ask, apply, headerRecord, readOnly, fixedColumns, m],
   );
 
   const openCellMenu = useCallback(
@@ -567,30 +594,30 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       if (!inSelection) selectCell(col, row);
       const ids = inSelection ? selectedRecordIds() : [record.id];
       const n = ids.length;
-      const copy: MenuItem = { label: "コピー", shortcut: "Ctrl+C", onClick: () => document.execCommand("copy") };
+      const copy: MenuItem = { label: m.copy, shortcut: "Ctrl+C", onClick: () => document.execCommand("copy") };
       setMenu({
         x,
         y,
         items: readOnly
           ? [copy]
           : [
-              { label: "上に行を挿入", onClick: () => insertRowsAt(ids[0], false, 1) },
-              { label: "下に行を挿入", shortcut: "Ctrl+Shift++", onClick: () => insertRowsAt(ids[n - 1], true, 1) },
-              { label: n > 1 ? `${n}行を複製` : "行を複製", onClick: () => duplicateRows(ids) },
+              { label: m.insertRowAbove, onClick: () => insertRowsAt(ids[0], false, 1) },
+              { label: m.insertRowBelow, shortcut: "Ctrl+Shift++", onClick: () => insertRowsAt(ids[n - 1], true, 1) },
+              { label: m.duplicateRows({ count: n }), onClick: () => duplicateRows(ids) },
               "separator",
               copy,
-              { label: "切り取り", shortcut: "Ctrl+X", onClick: () => document.execCommand("cut") },
+              { label: m.cut, shortcut: "Ctrl+X", onClick: () => document.execCommand("cut") },
               {
-                label: "貼り付け",
+                label: m.paste,
                 shortcut: "Ctrl+V",
-                onClick: () => toast("貼り付けは Ctrl+V を使ってください（ブラウザの制限により、メニューからは貼り付けできません）"),
+                onClick: () => toast(m.pasteFromMenu),
               },
               "separator",
-              { label: n > 1 ? `${n}行を削除` : "行を削除", shortcut: "Ctrl+-", danger: true, onClick: () => deleteRows(ids) },
+              { label: m.deleteRows({ count: n }), shortcut: "Ctrl+-", danger: true, onClick: () => deleteRows(ids) },
             ],
       });
     },
-    [rows, selectedRecordIds, selectCell, insertRowsAt, duplicateRows, deleteRows, toast, readOnly],
+    [rows, selectedRecordIds, selectCell, insertRowsAt, duplicateRows, deleteRows, toast, readOnly, m],
   );
 
   // ---- Images -------------------------------------------------------------------------
@@ -599,11 +626,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     async (recordId: number, files: File[]) => {
       if (!imageStore || !imagesWritable || !imagesCol || !file) {
         toast(
-          readOnly
-            ? "このファイルは読み取り専用です"
-            : caps?.tree
-              ? "このファイルには画像を追加できません"
-              : "画像を追加するには、CSVのあるフォルダを「フォルダを開く」で開いてください",
+          readOnly ? m.readOnlyFile : caps?.tree ? m.errorImagesUnavailable : m.imagesNeedFolder,
           "error",
         );
         return;
@@ -613,25 +636,25 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       const assetsDir = assetsDirFor(features.images?.assetsDir ?? "{name}.assets", file.name);
       const id = idCol ? cellValue(record, idCol.index).trim() : "";
       const base = id ? `case-${id}` : `row-${doc.records.indexOf(record)}`;
-      setActivity(files.length > 1 ? `画像を${files.length}枚追加中…` : "画像を追加中…");
+      setActivity(m.addingImages({ count: files.length }));
       try {
         const paths: string[] = [];
         for (const f of files) paths.push(await imageStore.add(f, assetsDir, base));
         const dir = dirOf(file.path);
         setEntries((prev) => (prev ? [...prev, ...paths.map((p) => ({ path: joinPath(dir, p) }))] : prev));
-        apply(paths.length > 1 ? `画像を${paths.length}枚追加` : "画像を追加", (d) => {
+        apply(m.addImagesAction({ count: paths.length }), (d) => {
           const current = d.records.find((r) => r.id === recordId);
           const lines = cellLines(cellValue(current, imagesCol.index));
           return setCells(d, [{ recordId, col: imagesCol.index, value: [...lines, ...paths].join("\n") }]);
         });
-        toast(`${paths.join(", ")} を保存しました`);
+        toast(m.imagesSaved({ paths: paths.join(m.listSeparator) }));
       } catch (e) {
-        toast(`画像を追加できませんでした: ${(e as Error).message}`, "error");
+        toast(m.addImageFailed({ detail: errorText(e, m) }), "error");
       } finally {
         setActivity(null);
       }
     },
-    [imageStore, imagesWritable, imagesCol, file, doc.records, features.images?.assetsDir, idCol, apply, toast, readOnly, caps],
+    [imageStore, imagesWritable, imagesCol, file, doc.records, features.images?.assetsDir, idCol, apply, toast, readOnly, caps, m],
   );
 
   const openImage = useCallback(
@@ -653,6 +676,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
 
   const viewCtx: ViewContext = {
     mode,
+    m,
     columns: rules.columns,
     features,
     labelColors: rules.ruleSet.labelColors ?? {},
@@ -705,7 +729,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       try {
         next = docFromBytes(bytes, path.toLowerCase().endsWith(".tsv") ? "\t" : undefined);
       } catch (e) {
-        toast(`読み込めませんでした: ${(e as Error).message}`, "error");
+        toast(m.loadFailed({ detail: errorText(e, m) }), "error");
         return;
       }
       dispatch({ type: "load", doc: next });
@@ -724,13 +748,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         setOverride({ error: (e as Error).message });
       }
     },
-    [toast, setFile, findOverride],
+    [toast, setFile, findOverride, m],
   );
 
-  const confirmDiscard = useCallback(
-    () => !isDirty(stateRef.current.doc) || window.confirm("保存していない変更があります。破棄して続けますか？"),
-    [],
-  );
+  const confirmDiscard = useCallback(() => !isDirty(stateRef.current.doc) || window.confirm(m.confirmDiscard), [m]);
 
   const openPath = useCallback(
     async (path: string, force = false) => {
@@ -742,10 +763,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         const { bytes, version } = await b.read(path);
         await loadDoc(path, bytes, version);
       } catch (e) {
-        toast(`開けませんでした: ${(e as Error).message}`, "error");
+        toast(m.openFailed({ detail: errorText(e, m) }), "error");
       }
     },
-    [confirmDiscard, loadDoc, toast],
+    [confirmDiscard, loadDoc, toast, m],
   );
 
   const reload = useCallback(async () => {
@@ -773,7 +794,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         try {
           list = await backend.listTree();
         } catch (e) {
-          toast(`ファイル一覧を取得できませんでした: ${(e as Error).message}`, "error");
+          toast(mRef.current.listFailed({ detail: errorText(e, mRef.current) }), "error");
         }
         if (cancelled) return;
         setEntries(list);
@@ -781,7 +802,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       }
       const initial = props.file ?? (props.openFirst && list ? firstCsv(buildTree("", list.map((e) => e.path).filter(isCsvPath))) : null);
       if (initial) await openPath(initial, true);
-      else if (props.openFirst && list) toast("このフォルダにはCSVファイルがありません");
+      else if (props.openFirst && list) toast(mRef.current.noCsvInFolder);
     })();
     void backend.variables?.().then(
       (vars) => !cancelled && setBackendVariables(vars),
@@ -791,7 +812,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       const f = fileRef.current;
       if (!f || !paths.includes(f.path) || savingRef.current) return;
       if (!isDirty(stateRef.current.doc)) {
-        void reload().then(() => toast("ファイルが外部で変更されたため、再読み込みしました"));
+        void reload().then(() => toast(mRef.current.reloadedExternal));
       } else {
         setExternalChange(true);
       }
@@ -821,13 +842,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       const modified = summary.changes.filter((c) => c.kind === "modified" && c.index > 0);
       const added = summary.changes.filter((c) => c.kind === "added");
       const removed = summary.changes.filter((c) => c.kind === "removed");
-      if (modified.length > 0) parts.push(`${modified.slice(0, 5).map((c) => label(c.record.id)).join(", ")}${modified.length > 5 ? " ほか" : ""} を更新`);
-      if (added.length > 0) parts.push(`${added.length}行を追加`);
-      if (removed.length > 0) parts.push(`${removed.length}行を削除`);
-      if (summary.reordered) parts.push("行を並べ替え");
-      return `${name}: ${parts.join("、") || "更新"}`;
+      if (modified.length > 0) {
+        parts.push(m.commitUpdated({ records: modified.slice(0, 5).map((c) => label(c.record.id)).join(m.listSeparator), more: modified.length > 5 }));
+      }
+      if (added.length > 0) parts.push(m.commitAdded({ count: added.length }));
+      if (removed.length > 0) parts.push(m.commitRemoved({ count: removed.length }));
+      if (summary.reordered) parts.push(m.commitReordered);
+      return m.commitMessage({ file: name, parts: parts.length > 0 ? parts : [m.commitFallback] });
     },
-    [describeRecord],
+    [describeRecord, m],
   );
 
   const save = useCallback(
@@ -839,7 +862,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       if (!isDirty(snapshot) && !force && !b.capabilities.download) return true;
       let message: string | undefined;
       if (b.capabilities.commitMessage) {
-        const answer = await ask("変更をコミット", "コミットメッセージ", defaultMessage(computeChanges(snapshot), f.name), "コミット");
+        const answer = await ask(m.commitTitle, m.commitMessageLabel, defaultMessage(computeChanges(snapshot), f.name), m.commit);
         if (answer === null || answer.trim() === "") return false;
         message = answer.trim();
       }
@@ -862,7 +885,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
               if (col >= 0) assigned.push({ recordId: Number(id), col, value });
             }
           }
-          dispatch({ type: "saved", doc: snapshot, assigned });
+          dispatch({ type: "saved", doc: snapshot, assigned, label: m.saved });
           const version = result.versions[f.path] ?? f.version;
           setFile((cur) => (cur && cur.path === f.path ? { ...cur, version } : cur));
           b.watch?.(f.path, version);
@@ -872,7 +895,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
           setJustSaved(true);
           justSavedTimer.current = window.setTimeout(() => setJustSaved(false), 2000);
           if (!b.capabilities.autosave) {
-            toast(result.message ?? (b.capabilities.download ? `${f.name} をダウンロードしました` : `${f.path} を保存しました`));
+            toast(result.message ?? (b.capabilities.download ? m.downloaded({ name: f.name }) : m.savedPath({ path: f.path })));
           }
           props.onSaved?.(result);
           return true;
@@ -881,12 +904,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
           setConflict(result.conflict);
           return false;
         }
-        toast(`保存できませんでした: ${result.error.message}`, "error");
+        const detail = result.error.code === "permission_denied" ? m.errorPermissionDenied : result.error.message;
+        toast(m.saveFailed({ detail }), "error");
         props.onError?.(result.error);
         return false;
       } catch (e) {
         const message = (e as Error).message;
-        toast(`保存できませんでした: ${message}`, "error");
+        toast(m.saveFailed({ detail: errorText(e, m) }), "error");
         props.onError?.({ code: "exception", message });
         return false;
       } finally {
@@ -894,7 +918,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
         setSaving(false);
       }
     },
-    [readOnly, ask, defaultMessage, recordChanges, setFile, toast, props.onSaved, props.onError], // eslint-disable-line react-hooks/exhaustive-deps
+    [readOnly, ask, defaultMessage, recordChanges, setFile, toast, props.onSaved, props.onError, m], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -994,10 +1018,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       if (typing) return;
       if (mod && !e.shiftKey && key === "z") {
         e.preventDefault();
-        dispatch({ type: "undo" });
+        dispatch({ type: "undo", label: m.undo });
       } else if (mod && (key === "y" || (e.shiftKey && key === "z"))) {
         e.preventDefault();
-        dispatch({ type: "redo" });
+        dispatch({ type: "redo", label: m.redo });
       } else if (mod && e.shiftKey && (e.key === "+" || e.key === "=" || e.code === "Semicolon")) {
         e.preventDefault();
         const ids = selectedRecordIds();
@@ -1009,7 +1033,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     };
     target.addEventListener("keydown", onKey);
     return () => target.removeEventListener("keydown", onKey);
-  }, [embedded, save, selectedRecordIds, insertRowsAt, deleteRows, readOnly]);
+  }, [embedded, save, selectedRecordIds, insertRowsAt, deleteRows, readOnly, m]);
 
   // ---- Render -------------------------------------------------------------------------
 
@@ -1044,14 +1068,14 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   );
 
   const tree = useMemo(
-    () => (entries ? buildTree(props.rootName || "ファイル", entries.map((e) => e.path).filter(isCsvPath)) : null),
-    [entries, props.rootName],
+    () => (entries ? buildTree(props.rootName || m.defaultRootName, entries.map((e) => e.path).filter(isCsvPath)) : null),
+    [entries, props.rootName, m],
   );
 
   const activeFilters = [
-    ...view.filters.filter((f) => f.text !== "").map((f) => ({ key: `f${f.col}`, label: `${headers[f.col] || `列 ${f.col + 1}`}: ${f.text}`, clear: () => setView((v) => ({ ...v, filters: v.filters.filter((x) => x.col !== f.col) })) })),
-    ...view.labels.map((l) => ({ key: `l${l}`, label: `ラベル: ${l}`, clear: () => setView((v) => ({ ...v, labels: v.labels.filter((x) => x !== l) })) })),
-    ...(sortInfo ? [{ key: "sort", label: `並べ替え: ${headers[sortInfo.col]} ${sortInfo.desc ? "↓" : "↑"}`, clear: clearSort }] : []),
+    ...view.filters.filter((f) => f.text !== "").map((f) => ({ key: `f${f.col}`, label: `${headerLabels[f.col] ?? m.columnN({ n: f.col + 1 })}: ${f.text}`, clear: () => setView((v) => ({ ...v, filters: v.filters.filter((x) => x.col !== f.col) })) })),
+    ...view.labels.map((l) => ({ key: `l${l}`, label: m.labelChip({ label: l }), clear: () => setView((v) => ({ ...v, labels: v.labels.filter((x) => x !== l) })) })),
+    ...(sortInfo ? [{ key: "sort", label: m.sortChip({ column: headerLabels[sortInfo.col] ?? "", arrow: sortInfo.desc ? "↓" : "↑" }), clear: clearSort }] : []),
   ];
 
   const ui = uiColors(mode);
@@ -1066,321 +1090,329 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     if (themeVars["--font"]) t.fontFamily = themeVars["--font"];
     return t;
   }, [themeVars]);
-  const saveLabel = caps?.download ? "ダウンロード" : caps?.commitMessage ? "コミット" : "保存";
+  const saveLabel = caps?.download ? m.download : caps?.commitMessage ? m.commit : m.save;
   // The save button shows its own progress and result, so a slow commit is never silent.
   const saveButtonLabel = saving
-    ? caps?.commitMessage ? "コミット中…" : "保存中…"
+    ? caps?.commitMessage ? m.committing : m.saving
     : justSaved && !dirty
-      ? caps?.commitMessage ? "コミットしました" : "保存しました"
+      ? caps?.commitMessage ? m.committed : m.saved
       : saveLabel;
   const saveButtonIcon = saving ? "spinner" : justSaved && !dirty ? "check" : caps?.download ? "download" : "save";
   const changeCount = changes.changes.length + (changes.reordered ? 1 : 0);
-  const saveState = saving ? "保存中…" : conflict ? "競合あり" : dirty ? "未保存" : "保存済み";
+  const saveState = saving ? m.saving : conflict ? m.stateConflict : dirty ? m.unsaved : m.stateSaved;
 
   return (
-    <div className="c4t c4t-root" data-theme={mode} ref={rootRef} tabIndex={embedded ? -1 : undefined} style={themeVars as CSSProperties | undefined}>
-      <div className="app">
-        <header className="toolbar">
-          {props.toolbarStart}
-          <div className="toolbar-group">
-            {caps?.autosave ? (
-              <span className={`save-state${dirty || conflict ? " pending" : ""}`} role="status">
-                {file ? saveState : ""}
-              </span>
-            ) : (
-              <button
-                className={`save-button${dirty && !saving ? " primary" : ""}${justSaved && !dirty && !saving ? " done" : ""}`}
-                onClick={() => void save()}
-                disabled={!file || readOnly || saving}
-                aria-busy={saving}
-                title={`${saveLabel} (Ctrl+S)`}
-              >
-                <Icon name={saveButtonIcon} className={saving ? "spin" : undefined} />
-                <span className="label" role="status">{saveButtonLabel}</span>
-                {dirty && !saving && <span className="badge">{changeCount}</span>}
-              </button>
-            )}
-            {activity && (
-              <span className="activity" role="status">
-                <Icon name="spinner" className="spin" />
-                {activity}
-              </span>
-            )}
-          </div>
-          <div className="toolbar-group">
-            <button className="icon-button" onClick={() => dispatch({ type: "undo" })} disabled={state.past.length === 0} title="元に戻す (Ctrl+Z)" aria-label="元に戻す">
-              <Icon name="undo" />
-            </button>
-            <button className="icon-button" onClick={() => dispatch({ type: "redo" })} disabled={state.future.length === 0} title="やり直す (Ctrl+Y)" aria-label="やり直す">
-              <Icon name="redo" />
-            </button>
-            {missingOptional.map((name) => (
-              <button key={name} onClick={() => addOptionalColumn(name)} disabled={!file} title={`KATATAN形式の ${name} 列を追加`}>
-                <Icon name={name === "Images" ? "image" : "tag"} />
-                <span className="label">{name}列を追加</span>
-              </button>
-            ))}
-          </div>
-          <div className="toolbar-search">
-            <Icon name="filter" size={14} />
-            <input
-              value={view.quick}
-              onChange={(e) => setView((v) => ({ ...v, quick: e.target.value }))}
-              placeholder="行を絞り込み…"
-              aria-label="行を絞り込み"
-              disabled={!file}
-            />
-            {view.quick && (
-              <button className="icon-button" onClick={() => setView((v) => ({ ...v, quick: "" }))} aria-label="絞り込みを解除">
-                <Icon name="x" size={12} />
-              </button>
-            )}
-          </div>
-          <div className="toolbar-group right">
-            <button className="icon-button" onClick={() => setFind({ open: true, replace: false })} disabled={!file} title="検索と置換 (Ctrl+F)" aria-label="検索と置換">
-              <Icon name="search" />
-            </button>
-            {tree && (
-              <button className={`icon-button${showTree ? " on" : ""}`} onClick={() => setShowTree(!showTree)} title="ファイル一覧" aria-label="ファイル一覧の表示切り替え" aria-pressed={showTree}>
-                <Icon name="tree" />
-              </button>
-            )}
-            <button className={`icon-button${panel ? " on" : ""}`} onClick={() => setPanel(panel ? null : "issues")} title="サイドパネル" aria-label="サイドパネルの表示切り替え" aria-pressed={!!panel}>
-              <Icon name="sidebar" />
-            </button>
-            {props.onToggleTheme && (
-              <button className="icon-button" onClick={props.onToggleTheme} title="テーマ切り替え" aria-label="ライト/ダークを切り替え">
-                <Icon name={mode === "dark" ? "sun" : "moon"} />
-              </button>
-            )}
-            <button className="icon-button" onClick={() => setHelp("shortcuts")} title="キーボードショートカット (?)" aria-label="キーボードショートカット">
-              <Icon name="keyboard" />
-            </button>
-            <button className="icon-button" onClick={() => setHelp("guide")} title="ヘルプ (F1)" aria-label="ヘルプ">
-              <Icon name="help" />
-            </button>
-          </div>
-        </header>
-
-        {conflict && (
-          <div className="banner warn" role="alert">
-            <Icon name="alert" />
-            <span>
-              保存できませんでした。{conflict.message ?? "ほかの人が先に変更しています。"}
-              {conflict.records && conflict.records.length > 0 && `（${conflict.records.map((r) => describeRecord(r.id)).join(", ")}）`}
-            </span>
-            <button onClick={() => window.confirm("自分の変更を破棄して、最新の内容を読み込みますか？") && void reload()}>最新を読み込む（変更を破棄）</button>
-            <button onClick={() => void save(true)}>上書きして保存</button>
-            <button onClick={() => setConflict(null)}>閉じる</button>
-          </div>
-        )}
-
-        {externalChange && !conflict && (
-          <div className="banner warn" role="alert">
-            <Icon name="alert" />
-            <span>ファイルが外部で変更されました（git pull / checkout など）。未保存の変更があります。</span>
-            <button onClick={() => window.confirm("未保存の変更を破棄して、最新の内容を読み込みますか？") && void reload()}>再読み込み（変更を破棄）</button>
-            <button onClick={() => setExternalChange(false)}>このまま編集を続ける</button>
-          </div>
-        )}
-
-        <div className="workspace">
-          {tree && showTree && (
-            <FileTree tree={tree} activePath={file?.path ?? null} dirty={dirty} onOpen={(p) => void openPath(p)} onRefresh={() => void refreshTree()} />
-          )}
-          <main className="main">
-            {file ? (
-              <>
-                {find.open && (
-                  <FindBar
-                    rows={rows}
-                    colCount={rules.columns.length}
-                    headers={headers}
-                    replaceMode={find.replace && !readOnly}
-                    onReplaceMode={(replace) => setFind({ open: true, replace: replace && !readOnly })}
-                    onJump={(m) => jumpTo(m.recordId, m.col)}
-                    onReplace={(edits: CellEdit[], label) => apply(label, (d) => setCells(d, edits))}
-                    onMatches={setMatches}
-                    onClose={() => {
-                      setFind({ open: false, replace: false });
-                      gridRef.current?.focus();
-                    }}
-                  />
-                )}
-                {activeFilters.length > 0 && (
-                  <div className="filter-bar">
-                    <span>
-                      {rows.length} / {doc.records.length - 1} 行を表示
-                    </span>
-                    {activeFilters.map((f) => (
-                      <span key={f.key} className="filter-chip">
-                        {f.label}
-                        <button onClick={f.clear} aria-label={`${f.label} を解除`}>
-                          <Icon name="x" size={11} />
-                        </button>
-                      </span>
-                    ))}
-                    <button
-                      className="link"
-                      onClick={() => {
-                        setView(EMPTY_VIEW);
-                        setSortInfo(null);
-                      }}
-                    >
-                      すべて解除
-                    </button>
-                  </div>
-                )}
-                {doc.records.length === 0 ? (
-                  <div className="empty-file">
-                    <p>このファイルは空です。</p>
-                    {!readOnly && (
-                      <button
-                        onClick={() =>
-                          apply("ヘッダーを作成", (d) => {
-                            // KATATAN files use a BOM and CRLF records.
-                            const withLayout = { ...d, layout: { ...d.layout, bom: true, eol: "\r\n", trailingEol: true } };
-                            return insertRecords(withLayout, 0, [["No", "Test Subject", "Preconditions", "Steps", "Expected Result", "Notes"]]).doc;
-                          })
-                        }
-                      >
-                        KATATAN形式のヘッダーを作成
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <Grid
-                    doc={doc}
-                    rows={rows}
-                    rules={rules}
-                    view={viewCtx}
-                    widths={widths}
-                    mode={mode}
-                    selection={selection}
-                    onSelectionChange={setSelection}
-                    canMoveRows={!filtered && !view.sortOrder}
-                    canExtend={!filtered && !readOnly}
-                    readOnly={readOnly}
-                    readOnlyCols={readOnlyCols}
-                    canEditColumns={!fixedColumns}
-                    highlights={highlights}
-                    themeOverride={canvasTheme}
-                    apply={apply}
-                    onInsertRow={(row, below) => {
-                      const record = rows[row];
-                      if (record) insertRowsAt(record.id, below);
-                    }}
-                    onInsertColumn={(at) => void addColumn(at)}
-                    onMoveRow={moveRow}
-                    onMoveColumn={(from, to) => apply("列を移動", (d) => moveColumn(d, from, to))}
-                    onColumnResize={(col, w) => {
-                      const header = rules.columns[col]?.header;
-                      if (header === undefined) return;
-                      setWidthsByHeader((prev) => {
-                        const next = { ...prev, [header]: Math.round(w) };
-                        if (widthKey) storageSet(widthKey, next);
-                        return next;
-                      });
-                    }}
-                    onHeaderMenu={openHeaderMenu}
-                    onCellMenu={openCellMenu}
-                    onImageFiles={(id, files) => void addImageFiles(id, files)}
-                    gridRef={gridRef}
-                  />
-                )}
-              </>
-            ) : backend && tree ? (
-              <div className="welcome">
-                <p className="muted">左の一覧からCSVファイルを選んでください。</p>
-              </div>
-            ) : (
-              props.emptyState
-            )}
-          </main>
-          {file && panel && (
-            <SidePanel
-              tab={panel}
-              onTab={setPanel}
-              onClose={() => setPanel(null)}
-              issues={issues}
-              variables={analysis.variables}
-              definedVariables={definedVariables}
-              labels={labelList}
-              activeLabels={view.labels}
-              onToggleLabel={(name) =>
-                setView((v) => ({
-                  ...v,
-                  labelCol: labelsCol?.index ?? null,
-                  labels: v.labels.includes(name) ? v.labels.filter((l) => l !== name) : [...v.labels, name],
-                }))
-              }
-              changes={changes}
-              headers={headers}
-              canSave={!!file && !readOnly}
-              onSave={() => void save()}
-              onJump={jumpTo}
-              describeRecord={describeRecord}
-              onFilterText={(text) => setView((v) => ({ ...v, quick: text }))}
-              rules={rules}
-              presetChoice={presetChoice}
-              onPreset={setPresetChoice}
-              override={override}
-              missingOptional={missingOptional}
-              onAddOptional={addOptionalColumn}
-              hasLabels={!!labelsCol}
-              hasVariables={!!features.variables}
-            />
-          )}
-        </div>
-
-        <footer className="status-bar">
-          {file ? (
-            <>
-              <span className="path" title={file.path}>
-                {dirty && <span className="dirty-dot" aria-label="未保存" />}
-                {file.path}
-                {readOnly && <span className="tag">{lfs ? "Git LFS のため読み取り専用" : "読み取り専用"}</span>}
-                {!readOnly && caps?.download && <span className="tag">読み取り専用・保存はダウンロード</span>}
-                {!readOnly && caps?.autosave && <span className="tag">自動保存</span>}
-              </span>
-              <span>{rules.ruleSet.name === "katatan" ? "KATATAN" : "汎用CSV"}</span>
-              <span>
-                {filtered ? `${rows.length} / ` : ""}
-                {Math.max(0, doc.records.length - 1)} 行 × {rules.columns.length} 列
-              </span>
-              <span>{doc.encoding === "utf-8" ? `UTF-8${doc.layout.bom ? " (BOM)" : ""}` : "Shift_JIS"}</span>
-              <span>
-                {doc.layout.eol === "\r\n" ? "CRLF" : doc.layout.eol === "\r" ? "CR" : "LF"}
-                {doc.layout.cellEol !== doc.layout.eol ? ` / セル内 ${doc.layout.cellEol === "\r\n" ? "CRLF" : "LF"}` : ""}
-              </span>
-              {issues.length > 0 && (
-                <button className="status-issues" onClick={() => setPanel("issues")} style={{ color: ui.dirty }}>
-                  <Icon name="alert" size={12} /> {issues.length}
+    <I18nProvider value={i18n}>
+      <div className="c4t c4t-root" data-theme={mode} lang={locale} ref={rootRef} tabIndex={embedded ? -1 : undefined} style={themeVars as CSSProperties | undefined}>
+        <div className="app">
+          <header className="toolbar">
+            {props.toolbarStart}
+            <div className="toolbar-group">
+              {caps?.autosave ? (
+                <span className={`save-state${dirty || conflict ? " pending" : ""}`} role="status">
+                  {file ? saveState : ""}
+                </span>
+              ) : (
+                <button
+                  className={`save-button${dirty && !saving ? " primary" : ""}${justSaved && !dirty && !saving ? " done" : ""}`}
+                  onClick={() => void save()}
+                  disabled={!file || readOnly || saving}
+                  aria-busy={saving}
+                  title={`${saveLabel} (Ctrl+S)`}
+                >
+                  <Icon name={saveButtonIcon} className={saving ? "spin" : undefined} />
+                  <span className="label" role="status">{saveButtonLabel}</span>
+                  {dirty && !saving && <span className="badge">{i18n.number(changeCount)}</span>}
                 </button>
               )}
-              <span className="spacer" />
-              {state.lastAction && <span className="muted">{state.lastAction}</span>}
-            </>
-          ) : (
-            <span className="muted">見た目のルールはCSVに書き込まれません。保存時は編集した行だけが変わります。</span>
-          )}
-        </footer>
-
-        {menu && <Menu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
-        {prompt && <PromptDialog request={prompt} onDone={() => setPrompt(null)} />}
-        {help === "shortcuts" && <ShortcutsDialog onClose={() => setHelp(null)} />}
-        {help === "guide" && <GuideDialog onClose={() => setHelp(null)} />}
-        {lightbox && (
-          <Lightbox images={lightboxImages} index={lightbox.index} onIndex={(index) => setLightbox({ ...lightbox, index })} onClose={() => setLightbox(null)} />
-        )}
-        <div className="toasts" role="status" aria-live="polite">
-          {toasts.map((t) => (
-            <div key={t.id} className={`toast ${t.kind}`}>
-              {t.text}
+              {activity && (
+                <span className="activity" role="status">
+                  <Icon name="spinner" className="spin" />
+                  {activity}
+                </span>
+              )}
             </div>
-          ))}
+            <div className="toolbar-group">
+              <button className="icon-button" onClick={() => dispatch({ type: "undo", label: m.undo })} disabled={state.past.length === 0} title={`${m.undo} (Ctrl+Z)`} aria-label={m.undo}>
+                <Icon name="undo" />
+              </button>
+              <button className="icon-button" onClick={() => dispatch({ type: "redo", label: m.redo })} disabled={state.future.length === 0} title={`${m.redo} (Ctrl+Y)`} aria-label={m.redo}>
+                <Icon name="redo" />
+              </button>
+              {missingOptional.map((name) => (
+                <button key={name} onClick={() => addOptionalColumn(name)} disabled={!file} title={m.addOptionalColumnTitle({ name })}>
+                  <Icon name={name === "Images" ? "image" : "tag"} />
+                  <span className="label">{m.addOptionalColumn({ name })}</span>
+                </button>
+              ))}
+            </div>
+            <div className="toolbar-search">
+              <Icon name="filter" size={14} />
+              <input
+                value={view.quick}
+                onChange={(e) => setView((v) => ({ ...v, quick: e.target.value }))}
+                placeholder={m.quickFilterPlaceholder}
+                aria-label={m.quickFilter}
+                disabled={!file}
+              />
+              {view.quick && (
+                <button className="icon-button" onClick={() => setView((v) => ({ ...v, quick: "" }))} aria-label={m.clearQuickFilter}>
+                  <Icon name="x" size={12} />
+                </button>
+              )}
+            </div>
+            <div className="toolbar-group right">
+              <button className="icon-button" onClick={() => setFind({ open: true, replace: false })} disabled={!file} title={`${m.findReplace} (Ctrl+F)`} aria-label={m.findReplace}>
+                <Icon name="search" />
+              </button>
+              {tree && (
+                <button className={`icon-button${showTree ? " on" : ""}`} onClick={() => setShowTree(!showTree)} title={m.fileList} aria-label={m.toggleFileList} aria-pressed={showTree}>
+                  <Icon name="tree" />
+                </button>
+              )}
+              <button className={`icon-button${panel ? " on" : ""}`} onClick={() => setPanel(panel ? null : "issues")} title={m.sidePanel} aria-label={m.toggleSidePanel} aria-pressed={!!panel}>
+                <Icon name="sidebar" />
+              </button>
+              {props.onToggleTheme && (
+                <button className="icon-button" onClick={props.onToggleTheme} title={m.toggleThemeTitle} aria-label={m.toggleTheme}>
+                  <Icon name={mode === "dark" ? "sun" : "moon"} />
+                </button>
+              )}
+              {props.onToggleLocale && (
+                <button className="locale-button" onClick={props.onToggleLocale} title={m.switchLanguageTitle} aria-label={m.switchLanguageTitle} lang={locale === "ja" ? "en" : "ja"}>
+                  <Icon name="globe" size={15} />
+                  <span className="label">{m.switchLanguage}</span>
+                </button>
+              )}
+              <button className="icon-button" onClick={() => setHelp("shortcuts")} title={`${m.keyboardShortcuts} (?)`} aria-label={m.keyboardShortcuts}>
+                <Icon name="keyboard" />
+              </button>
+              <button className="icon-button" onClick={() => setHelp("guide")} title={`${m.help} (F1)`} aria-label={m.help}>
+                <Icon name="help" />
+              </button>
+            </div>
+          </header>
+
+          {conflict && (
+            <div className="banner warn" role="alert">
+              <Icon name="alert" />
+              <span>
+                {m.saveFailedBanner}
+                {conflict.message ?? (conflict.code === "modified_externally" ? m.conflictModifiedExternally : m.conflictDefault)}
+                {conflict.records &&
+                  conflict.records.length > 0 &&
+                  m.conflictRecords({ records: conflict.records.map((r) => describeRecord(r.id)).join(m.listSeparator) })}
+              </span>
+              <button onClick={() => window.confirm(m.confirmReloadDiscardMine) && void reload()}>{m.reloadLatest}</button>
+              <button onClick={() => void save(true)}>{m.overwrite}</button>
+              <button onClick={() => setConflict(null)}>{m.close}</button>
+            </div>
+          )}
+
+          {externalChange && !conflict && (
+            <div className="banner warn" role="alert">
+              <Icon name="alert" />
+              <span>{m.externalChanged}</span>
+              <button onClick={() => window.confirm(m.confirmReloadDiscardUnsaved) && void reload()}>{m.reloadDiscard}</button>
+              <button onClick={() => setExternalChange(false)}>{m.keepEditing}</button>
+            </div>
+          )}
+
+          <div className="workspace">
+            {tree && showTree && (
+              <FileTree tree={tree} activePath={file?.path ?? null} dirty={dirty} onOpen={(p) => void openPath(p)} onRefresh={() => void refreshTree()} />
+            )}
+            <main className="main">
+              {file ? (
+                <>
+                  {find.open && (
+                    <FindBar
+                      rows={rows}
+                      colCount={rules.columns.length}
+                      headers={headerLabels}
+                      replaceMode={find.replace && !readOnly}
+                      onReplaceMode={(replace) => setFind({ open: true, replace: replace && !readOnly })}
+                      onJump={(m) => jumpTo(m.recordId, m.col)}
+                      onReplace={(edits: CellEdit[], label) => apply(label, (d) => setCells(d, edits))}
+                      onMatches={setMatches}
+                      onClose={() => {
+                        setFind({ open: false, replace: false });
+                        gridRef.current?.focus();
+                      }}
+                    />
+                  )}
+                  {activeFilters.length > 0 && (
+                    <div className="filter-bar">
+                      <span>{m.shownRows({ shown: rows.length, total: doc.records.length - 1 })}</span>
+                      {activeFilters.map((f) => (
+                        <span key={f.key} className="filter-chip">
+                          {f.label}
+                          <button onClick={f.clear} aria-label={m.clearChip({ label: f.label })}>
+                            <Icon name="x" size={11} />
+                          </button>
+                        </span>
+                      ))}
+                      <button
+                        className="link"
+                        onClick={() => {
+                          setView(EMPTY_VIEW);
+                          setSortInfo(null);
+                        }}
+                      >
+                        {m.clearAll}
+                      </button>
+                    </div>
+                  )}
+                  {doc.records.length === 0 ? (
+                    <div className="empty-file">
+                      <p>{m.emptyFile}</p>
+                      {!readOnly && (
+                        <button
+                          onClick={() =>
+                            apply(m.createHeaderAction, (d) => {
+                              // KATATAN files use a BOM and CRLF records.
+                              const withLayout = { ...d, layout: { ...d.layout, bom: true, eol: "\r\n", trailingEol: true } };
+                              return insertRecords(withLayout, 0, [["No", "Test Subject", "Preconditions", "Steps", "Expected Result", "Notes"]]).doc;
+                            })
+                          }
+                        >
+                          {m.createKatatanHeader}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <Grid
+                      doc={doc}
+                      rows={rows}
+                      rules={rules}
+                      titles={headerLabels}
+                      view={viewCtx}
+                      widths={widths}
+                      mode={mode}
+                      selection={selection}
+                      onSelectionChange={setSelection}
+                      canMoveRows={!filtered && !view.sortOrder}
+                      canExtend={!filtered && !readOnly}
+                      readOnly={readOnly}
+                      readOnlyCols={readOnlyCols}
+                      canEditColumns={!fixedColumns}
+                      highlights={highlights}
+                      themeOverride={canvasTheme}
+                      apply={apply}
+                      onInsertRow={(row, below) => {
+                        const record = rows[row];
+                        if (record) insertRowsAt(record.id, below);
+                      }}
+                      onInsertColumn={(at) => void addColumn(at)}
+                      onMoveRow={moveRow}
+                      onMoveColumn={(from, to) => apply(m.moveColumn, (d) => moveColumn(d, from, to))}
+                      onColumnResize={(col, w) => {
+                        const header = rules.columns[col]?.header;
+                        if (header === undefined) return;
+                        setWidthsByHeader((prev) => {
+                          const next = { ...prev, [header]: Math.round(w) };
+                          if (widthKey) storageSet(widthKey, next);
+                          return next;
+                        });
+                      }}
+                      onHeaderMenu={openHeaderMenu}
+                      onCellMenu={openCellMenu}
+                      onImageFiles={(id, files) => void addImageFiles(id, files)}
+                      gridRef={gridRef}
+                    />
+                  )}
+                </>
+              ) : backend && tree ? (
+                <div className="welcome">
+                  <p className="muted">{m.chooseFile}</p>
+                </div>
+              ) : (
+                props.emptyState
+              )}
+            </main>
+            {file && panel && (
+              <SidePanel
+                tab={panel}
+                onTab={setPanel}
+                onClose={() => setPanel(null)}
+                issues={issues}
+                variables={analysis.variables}
+                definedVariables={definedVariables}
+                labels={labelList}
+                activeLabels={view.labels}
+                onToggleLabel={(name) =>
+                  setView((v) => ({
+                    ...v,
+                    labelCol: labelsCol?.index ?? null,
+                    labels: v.labels.includes(name) ? v.labels.filter((l) => l !== name) : [...v.labels, name],
+                  }))
+                }
+                changes={changes}
+                headers={headerLabels}
+                columnLabel={columnLabel}
+                canSave={!!file && !readOnly}
+                onSave={() => void save()}
+                onJump={jumpTo}
+                describeRecord={describeRecord}
+                onFilterText={(text) => setView((v) => ({ ...v, quick: text }))}
+                rules={rules}
+                presetChoice={presetChoice}
+                onPreset={setPresetChoice}
+                override={override}
+                missingOptional={missingOptional}
+                onAddOptional={addOptionalColumn}
+                hasLabels={!!labelsCol}
+                hasVariables={!!features.variables}
+              />
+            )}
+          </div>
+
+          <footer className="status-bar">
+            {file ? (
+              <>
+                <span className="path" title={file.path}>
+                  {dirty && <span className="dirty-dot" aria-label={m.unsaved} />}
+                  {file.path}
+                  {readOnly && <span className="tag">{lfs ? m.readOnlyLfs : m.readOnly}</span>}
+                  {!readOnly && caps?.download && <span className="tag">{m.readOnlyDownload}</span>}
+                  {!readOnly && caps?.autosave && <span className="tag">{m.autosave}</span>}
+                </span>
+                <span>{rules.ruleSet.name === "katatan" ? m.presetKatatan : m.presetGeneric}</span>
+                <span>{m.size({ rows: Math.max(0, doc.records.length - 1), columns: rules.columns.length, shown: filtered ? rows.length : undefined })}</span>
+                <span>{doc.encoding === "utf-8" ? `UTF-8${doc.layout.bom ? " (BOM)" : ""}` : "Shift_JIS"}</span>
+                <span>
+                  {doc.layout.eol === "\r\n" ? "CRLF" : doc.layout.eol === "\r" ? "CR" : "LF"}
+                  {doc.layout.cellEol !== doc.layout.eol ? m.inCellEol({ eol: doc.layout.cellEol === "\r\n" ? "CRLF" : "LF" }) : ""}
+                </span>
+                {issues.length > 0 && (
+                  <button className="status-issues" onClick={() => setPanel("issues")} style={{ color: ui.dirty }}>
+                    <Icon name="alert" size={12} /> {i18n.number(issues.length)}
+                  </button>
+                )}
+                <span className="spacer" />
+                {state.lastAction && <span className="muted">{state.lastAction}</span>}
+              </>
+            ) : (
+              <span className="muted">{m.footerNote}</span>
+            )}
+          </footer>
+
+          {menu && <Menu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+          {prompt && <PromptDialog request={prompt} onDone={() => setPrompt(null)} />}
+          {help === "shortcuts" && <ShortcutsDialog onClose={() => setHelp(null)} />}
+          {help === "guide" && <GuideDialog onClose={() => setHelp(null)} />}
+          {lightbox && (
+            <Lightbox images={lightboxImages} index={lightbox.index} onIndex={(index) => setLightbox({ ...lightbox, index })} onClose={() => setLightbox(null)} />
+          )}
+          <div className="toasts" role="status" aria-live="polite">
+            {toasts.map((t) => (
+              <div key={t.id} className={`toast ${t.kind}`}>
+                {t.text}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+    </I18nProvider>
   );
 });

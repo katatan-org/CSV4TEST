@@ -20,6 +20,7 @@ import { cellValue, columnCount, setCells, type CellEdit, type CsvDoc } from "..
 import type { CsvRecord } from "../csv/types";
 import { isCellDirty } from "../editor/changes";
 import { parseTsv, toTsv } from "../editor/clipboard";
+import { useI18n } from "../i18n";
 import { editViewCells, rowsAddedBy, type ViewCellEdit } from "../editor/viewRows";
 import type { ResolvedRules } from "../rules/detect";
 import { headerMatches } from "../rules/schema";
@@ -33,6 +34,8 @@ export interface GridProps {
   doc: CsvDoc;
   rows: CsvRecord[];
   rules: ResolvedRules;
+  /** Column titles: the display names of the headers (see Editor columnLabels). */
+  titles: string[];
   view: ViewContext;
   widths: number[];
   mode: ThemeMode;
@@ -110,7 +113,10 @@ function toHtmlTable(values: string[][]): string {
 }
 
 export function Grid(props: GridProps) {
-  const { rows, rules, view, widths, mode, selection, apply, gridRef } = props;
+  const { rows, rules, titles, view, widths, mode, selection, apply, gridRef } = props;
+  const { m } = useI18n();
+  const mRef = useRef(m);
+  mRef.current = m;
   const viewRef = useRef(view);
   viewRef.current = view;
   const propsRef = useRef(props);
@@ -133,11 +139,11 @@ export function Grid(props: GridProps) {
     () =>
       rules.columns.map((c, i) => ({
         id: String(i),
-        title: c.header === "" ? `(列 ${i + 1})` : c.header,
+        title: titles[i] ?? c.header,
         width: widths[i],
         hasMenu: true,
       })),
-    [rules.columns, widths],
+    [rules.columns, titles, widths],
   );
 
   const getCellContent = useCallback(
@@ -208,11 +214,11 @@ export function Grid(props: GridProps) {
       }
       if (edits.length === 0) return true;
       const added = rowsAddedBy(rows.length, edits);
-      const label = edits.length > 1 ? `${edits.length}セルを編集` : "セルを編集";
-      apply(added > 0 ? `${label}（${added}行追加）` : label, (d) => editViewCells(d, rows, edits));
+      const label = m.editCells({ count: edits.length });
+      apply(added > 0 ? m.withAddedRows({ action: label, count: added }) : label, (d) => editViewCells(d, rows, edits));
       return true;
     },
-    [rows, apply],
+    [rows, apply, m],
   );
 
   const clearRect = useCallback(
@@ -231,10 +237,10 @@ export function Grid(props: GridProps) {
   const onDelete = useCallback(
     (sel: GridSelection) => {
       const rect = selectionRect(sel, rows.length, colCount);
-      if (rect) clearRect(rect, "セルをクリア");
+      if (rect) clearRect(rect, m.clearCells);
       return false;
     },
-    [rows.length, colCount, clearRect],
+    [rows.length, colCount, clearRect, m],
   );
 
   // Clipboard: handled here (not by Glide) so multi-line cells round-trip with Excel.
@@ -262,7 +268,7 @@ export function Grid(props: GridProps) {
       const values = readRect(rect);
       e.clipboardData.setData("text/plain", toTsv(values));
       e.clipboardData.setData("text/html", toHtmlTable(values));
-      if (cut) clearRect(rect, "切り取り");
+      if (cut) clearRect(rect, mRef.current.cut);
     };
     const onPaste = (e: ClipboardEvent) => {
       if (!gridHasFocus() || !e.clipboardData) return;
@@ -292,7 +298,8 @@ export function Grid(props: GridProps) {
         });
       });
       const added = rowsAddedBy(p.rows.length, edits);
-      p.apply(added > 0 ? `貼り付け（${added}行追加）` : "貼り付け", (d) => editViewCells(d, p.rows, edits));
+      const label = mRef.current.paste;
+      p.apply(added > 0 ? mRef.current.withAddedRows({ action: label, count: added }) : label, (d) => editViewCells(d, p.rows, edits));
     };
     const copy = (e: ClipboardEvent) => onCopy(e, false);
     const cut = (e: ClipboardEvent) => onCopy(e, true);
@@ -379,14 +386,14 @@ export function Grid(props: GridProps) {
     if (hover.kind === "row") {
       const x = rect.x + rect.width / 2;
       insertButtons = [
-        insertButton("above", x, rect.y, "上に行を挿入", () => props.onInsertRow(index, false)),
-        insertButton("below", x, rect.y + rect.height, "下に行を挿入", () => props.onInsertRow(index, true)),
+        insertButton("above", x, rect.y, m.insertRowAbove, () => props.onInsertRow(index, false)),
+        insertButton("below", x, rect.y + rect.height, m.insertRowBelow, () => props.onInsertRow(index, true)),
       ];
     } else {
       const y = rect.y + rect.height / 2;
       insertButtons = [
-        insertButton("left", rect.x, y, "左に列を挿入", () => props.onInsertColumn(index)),
-        insertButton("right", rect.x + rect.width, y, "右に列を挿入", () => props.onInsertColumn(index + 1)),
+        insertButton("left", rect.x, y, m.insertColumnLeft, () => props.onInsertColumn(index)),
+        insertButton("right", rect.x + rect.width, y, m.insertColumnRight, () => props.onInsertColumn(index + 1)),
       ];
     }
   }

@@ -6,6 +6,7 @@ import { ensurePermission, getDir, getFile, readHandle, writeHandle } from "../f
 import {
   capabilities,
   NotFoundError,
+  StorageError,
   type BackendCapabilities,
   type ChangeSet,
   type FileContent,
@@ -155,7 +156,7 @@ export class FsAccessBackend implements StorageBackend {
 
   async save(changeSet: ChangeSet): Promise<SaveResult> {
     if (!(await ensurePermission(this.root, "readwrite"))) {
-      return { ok: false, error: { code: "permission_denied", message: "書き込みが許可されませんでした" } };
+      return { ok: false, error: { code: "permission_denied", message: "Permission to write was not granted" } };
     }
     this.poller.paused = true;
     try {
@@ -166,7 +167,7 @@ export class FsAccessBackend implements StorageBackend {
           if (f.baseVersion !== null && now !== null && now !== f.baseVersion) moved.push(f.path);
         }
         if (moved.length > 0) {
-          return { ok: false, conflict: { paths: moved, message: "ファイルが外部で変更されています（git checkout など）" } };
+          return { ok: false, conflict: { paths: moved, code: "modified_externally" } };
         }
       }
       const versions: Record<string, string> = {};
@@ -205,9 +206,9 @@ export class FsAccessBackend implements StorageBackend {
   }
 
   async addAsset(dir: string, baseName: string, file: Blob & { name?: string }): Promise<string> {
-    if (!(await ensurePermission(this.root, "readwrite"))) throw new Error("書き込みが許可されませんでした");
+    if (!(await ensurePermission(this.root, "readwrite"))) throw new StorageError("permission_denied", "Permission to write was not granted");
     const folder = await getDir(this.root, dir ? dir.split("/") : [], true);
-    if (!folder) throw new Error(`${dir} を作成できませんでした`);
+    if (!folder) throw new StorageError("create_folder_failed", `Could not create ${dir}`, { path: dir });
     const ext = imageExtension(file);
     let n = 1;
     let name = `${baseName}-${n}.${ext}`;
@@ -260,7 +261,7 @@ export class FsFileBackend implements StorageBackend {
     try {
       const now = String((await this.handle.getFile()).lastModified);
       if (!changeSet.force && f.baseVersion !== null && now !== f.baseVersion) {
-        return { ok: false, conflict: { paths: [f.path], message: "ファイルが外部で変更されています（git checkout など）" } };
+        return { ok: false, conflict: { paths: [f.path], code: "modified_externally" } };
       }
       const version = String(await writeHandle(this.handle, f.bytes));
       this.poller.track(f.path, version);
