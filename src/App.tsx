@@ -102,10 +102,7 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const editorRef = useRef<EditorHandle>(null);
 
-  const confirmDiscard = useCallback(
-    () => !editorRef.current?.isDirty() || window.confirm(m.confirmDiscard),
-    [m],
-  );
+  const confirmDiscard = useCallback(async () => !editorRef.current || (await editorRef.current.confirmDiscard()), []);
 
   const open = useCallback((next: Opened) => {
     setOpened((prev) => {
@@ -122,7 +119,7 @@ export function App() {
 
   const openFolderHandle = useCallback(
     async (dir: FileSystemDirectoryHandle) => {
-      if (!confirmDiscard()) return;
+      if (!(await confirmDiscard())) return;
       open({ backend: new FsAccessBackend(dir), rootName: dir.name, openFirst: true });
     },
     [confirmDiscard, open],
@@ -130,7 +127,7 @@ export function App() {
 
   const openFileHandle = useCallback(
     async (handle: FileSystemFileHandle) => {
-      if (!confirmDiscard()) return;
+      if (!(await confirmDiscard())) return;
       open({ backend: new FsFileBackend(handle), file: handle.name });
     },
     [confirmDiscard, open],
@@ -138,7 +135,7 @@ export function App() {
 
   const openUpload = useCallback(
     async (f: File) => {
-      if (!confirmDiscard()) return;
+      if (!(await confirmDiscard())) return;
       open({ backend: downloadBackend(f.name, new Uint8Array(await f.arrayBuffer())), file: f.name });
     },
     [confirmDiscard, open],
@@ -170,7 +167,7 @@ export function App() {
   }, [openFileHandle, openUpload, showError]);
 
   const openSample = useCallback(async () => {
-    if (!confirmDiscard()) return;
+    if (!(await confirmDiscard())) return;
     const res = await fetch(SAMPLE_URL);
     open({ backend: downloadBackend(SAMPLE_URL, new Uint8Array(await res.arrayBuffer())), file: SAMPLE_URL });
   }, [confirmDiscard, open]);

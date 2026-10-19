@@ -29,7 +29,7 @@ import { analyze, nextId, referencedImages, type Issue } from "./rules/analysis"
 import { findColumn, headersOf, parseRuleOverride, resolveRules, type RuleOverride } from "./rules/detect";
 import { cellLines } from "./rules/tokens";
 import { NotFoundError, dirOf, joinPath, type SaveResult, type StorageBackend, type TreeEntry, type VariableDef } from "./storage/types";
-import { GuideDialog, Lightbox, PromptDialog, ShortcutsDialog, type PromptRequest } from "./ui/Dialogs";
+import { ConfirmDialog, GuideDialog, Lightbox, PromptDialog, ShortcutsDialog, type ConfirmRequest, type PromptRequest } from "./ui/Dialogs";
 import { buildTree, FileTree, type TreeNode } from "./ui/FileTree";
 import { FindBar } from "./ui/FindBar";
 import { emptySelection, Grid, selectionRect } from "./ui/Grid";
@@ -89,6 +89,8 @@ export interface EditorHandle {
   save(): Promise<boolean>;
   open(path: string): Promise<void>;
   currentPath(): string | null;
+  /** Asks before throwing away unsaved changes. Resolves to true when there are none or the user agrees. */
+  confirmDiscard(): Promise<boolean>;
 }
 
 interface OpenFile {
@@ -165,6 +167,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   const [matches, setMatches] = useState<Match[]>([]);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [prompt, setPrompt] = useState<PromptRequest | null>(null);
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   const [help, setHelp] = useState<"shortcuts" | "guide" | null>(null);
   const [lightbox, setLightbox] = useState<{ paths: string[]; index: number } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -218,6 +221,17 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
   const ask = useCallback(
     (title: string, label: string, initial?: string, confirmLabel?: string) =>
       new Promise<string | null>((resolve) => setPrompt({ title, label, initial, confirmLabel, resolve })),
+    [],
+  );
+
+  const confirm = useCallback(
+    (title: string, message: string, confirmLabel?: string) =>
+      new Promise<boolean>((resolve) =>
+        setConfirmReq((prev) => {
+          prev?.resolve(false);
+          return { title, message, confirmLabel, resolve };
+        }),
+      ),
     [],
   );
 
@@ -574,8 +588,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
                 {
                   label: m.deleteColumn({ name }),
                   danger: true,
-                  onClick: () => {
-                    if (window.confirm(m.confirmDeleteColumn({ name }))) apply(m.deleteColumn({ name }), (d) => deleteColumn(d, col));
+                  onClick: async () => {
+                    if (await confirm(m.deleteColumn({ name }), m.confirmDeleteColumn({ name }), m.deleteConfirm)) apply(m.deleteColumn({ name }), (d) => deleteColumn(d, col));
                   },
                 },
               ] as MenuItem[])
@@ -751,14 +765,17 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
     [toast, setFile, findOverride, m],
   );
 
-  const confirmDiscard = useCallback(() => !isDirty(stateRef.current.doc) || window.confirm(m.confirmDiscard), [m]);
+  const confirmDiscard = useCallback(
+    async () => !isDirty(stateRef.current.doc) || (await confirm(m.discardTitle, m.confirmDiscard, m.discardAndContinue)),
+    [confirm, m],
+  );
 
   const openPath = useCallback(
     async (path: string, force = false) => {
       const b = backendRef.current;
       if (!b) return;
       if (!force && fileRef.current?.path === path) return;
-      if (!force && !confirmDiscard()) return;
+      if (!force && !(await confirmDiscard())) return;
       try {
         const { bytes, version } = await b.read(path);
         await loadDoc(path, bytes, version);
@@ -937,8 +954,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       save: () => saveRef.current(),
       open: (path: string) => openPath(path),
       currentPath: () => fileRef.current?.path ?? null,
+      confirmDiscard,
     }),
-    [openPath],
+    [openPath, confirmDiscard],
   );
 
   // コールバックの戻り値を cleanup として返さないよう、ブロックにする（Svelte の dispatch は boolean を返す）
@@ -996,6 +1014,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
       const e = event as KeyboardEvent;
       const mod = e.ctrlKey || e.metaKey;
       const el = e.target as HTMLElement | null;
+      // A dialog takes the keyboard, as window.confirm used to.
+      if (el?.closest?.(".modal")) return;
       const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
       const key = e.key.toLowerCase();
       if (mod && key === "s") {
@@ -1203,7 +1223,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
                   conflict.records.length > 0 &&
                   m.conflictRecords({ records: conflict.records.map((r) => describeRecord(r.id)).join(m.listSeparator) })}
               </span>
-              <button onClick={() => window.confirm(m.confirmReloadDiscardMine) && void reload()}>{m.reloadLatest}</button>
+              <button onClick={async () => (await confirm(m.reloadTitle, m.confirmReloadDiscardMine, m.discardAndReload)) && void reload()}>{m.reloadLatest}</button>
               <button onClick={() => void save(true)}>{m.overwrite}</button>
               <button onClick={() => setConflict(null)}>{m.close}</button>
             </div>
@@ -1213,7 +1233,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
             <div className="banner warn" role="alert">
               <Icon name="alert" />
               <span>{m.externalChanged}</span>
-              <button onClick={() => window.confirm(m.confirmReloadDiscardUnsaved) && void reload()}>{m.reloadDiscard}</button>
+              <button onClick={async () => (await confirm(m.reloadTitle, m.confirmReloadDiscardUnsaved, m.discardAndReload)) && void reload()}>{m.reloadDiscard}</button>
               <button onClick={() => setExternalChange(false)}>{m.keepEditing}</button>
             </div>
           )}
@@ -1399,6 +1419,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(prop
 
           {menu && <Menu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
           {prompt && <PromptDialog request={prompt} onDone={() => setPrompt(null)} />}
+          {confirmReq && <ConfirmDialog request={confirmReq} onDone={() => setConfirmReq(null)} />}
           {help === "shortcuts" && <ShortcutsDialog onClose={() => setHelp(null)} />}
           {help === "guide" && <GuideDialog onClose={() => setHelp(null)} />}
           {lightbox && (

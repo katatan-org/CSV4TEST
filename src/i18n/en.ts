@@ -58,6 +58,8 @@ export const en: Messages = {
   externalChanged: "The file was changed outside the editor (git pull / checkout, etc.). You have unsaved changes.",
   confirmReloadDiscardUnsaved: "Discard your unsaved changes and load the latest content?",
   reloadDiscard: "Reload (discard changes)",
+  reloadTitle: "Load the latest content",
+  discardAndReload: "Discard and reload",
   keepEditing: "Keep editing",
 
   // ---- Filters and sorting ----
@@ -94,6 +96,7 @@ export const en: Messages = {
   renameConfirm: "Rename",
   deleteColumn: (p) => `Delete column "${p.name}"`,
   confirmDeleteColumn: (p) => `Delete column "${p.name}"? (You can bring it back with Undo.)`,
+  deleteConfirm: "Delete",
   moveColumn: "Move column",
   copy: "Copy",
   cut: "Cut",
@@ -126,6 +129,8 @@ export const en: Messages = {
 
   // ---- Files and saving ----
   confirmDiscard: "You have unsaved changes. Discard them and continue?",
+  discardTitle: "Unsaved changes",
+  discardAndContinue: "Discard and continue",
   loadFailed: (p) => `Could not read the file: ${p.detail}`,
   openFailed: (p) => `Could not open the file: ${p.detail}`,
   listFailed: (p) => `Could not list the files: ${p.detail}`,

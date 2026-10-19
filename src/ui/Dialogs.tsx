@@ -76,6 +76,45 @@ export function PromptDialog({ request, onDone }: { request: PromptRequest; onDo
   );
 }
 
+export interface ConfirmRequest {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  resolve: (ok: boolean) => void;
+}
+
+/** A yes/no question in place of `window.confirm`, laid out like `PromptDialog`. */
+export function ConfirmDialog({ request, onDone }: { request: ConfirmRequest; onDone: () => void }) {
+  const ok = useRef<HTMLButtonElement>(null);
+  const { m } = useI18n();
+  useEffect(() => ok.current?.focus(), []);
+  const finish = (v: boolean) => {
+    request.resolve(v);
+    onDone();
+  };
+  return (
+    <Modal title={request.title} onClose={() => finish(false)}>
+      <form
+        className="prompt"
+        onSubmit={(e) => {
+          e.preventDefault();
+          finish(true);
+        }}
+      >
+        <p>{request.message}</p>
+        <footer>
+          <button type="button" onClick={() => finish(false)}>
+            {m.cancel}
+          </button>
+          <button ref={ok} type="submit" className="primary">
+            {request.confirmLabel ?? m.ok}
+          </button>
+        </footer>
+      </form>
+    </Modal>
+  );
+}
+
 export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   const { m, locale } = useI18n();
   const help = HELP[locale];
