@@ -301,3 +301,39 @@ test("help opens from the start screen; folder button explains itself where unsu
   await folder.click({ force: true });
   await expect(page.locator(".toast")).toContainText("Chrome / Edge");
 });
+
+test("discarding unsaved changes asks in an in-page dialog, not window.confirm", async ({ page }) => {
+  page.on("dialog", (d) => {
+    throw new Error(`unexpected browser dialog: ${d.message()}`);
+  });
+  await openRepo(page);
+  await clickCell(page, 1, 2);
+  await page.keyboard.press("Enter");
+  const editor = page.locator(".cell-editor textarea");
+  await editor.fill("Edited subject");
+  await editor.press("Enter");
+  await expect(page.locator(".toolbar .badge")).toHaveText("1");
+
+  const reopen = () =>
+    page.evaluate(() => {
+      void (async () => {
+        const repo = await (await navigator.storage.getDirectory()).getDirectoryHandle("repo");
+        await (window as unknown as { __csv4test: Hook }).__csv4test.openFolderHandle(repo);
+      })();
+    });
+
+  await reopen();
+  const dialog = page.getByRole("dialog", { name: "保存していない変更" });
+  await expect(dialog).toContainText("保存していない変更があります。破棄して続けますか？");
+  await page.screenshot({ path: "e2e-results/confirm-dialog.png" });
+  await dialog.getByRole("button", { name: "キャンセル" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(".toolbar .badge")).toHaveText("1");
+
+  await reopen();
+  await dialog.getByRole("button", { name: "破棄して続ける" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(".toolbar .badge")).toHaveCount(0);
+  await expect.poll(async () => (await cells(page)).flat()).toContain("Can add a card to the list");
+  expect((await cells(page)).flat()).not.toContain("Edited subject");
+});

@@ -61,6 +61,8 @@ export const ja = {
   externalChanged: "ファイルが外部で変更されました（git pull / checkout など）。未保存の変更があります。",
   confirmReloadDiscardUnsaved: "未保存の変更を破棄して、最新の内容を読み込みますか？",
   reloadDiscard: "再読み込み（変更を破棄）",
+  reloadTitle: "最新の内容を読み込む",
+  discardAndReload: "破棄して読み込む",
   keepEditing: "このまま編集を続ける",
 
   // ---- Filters and sorting ----
@@ -97,6 +99,7 @@ export const ja = {
   renameConfirm: "変更",
   deleteColumn: (p: { name: string }) => `列「${p.name}」を削除`,
   confirmDeleteColumn: (p: { name: string }) => `列「${p.name}」を削除しますか？（元に戻すで復元できます）`,
+  deleteConfirm: "削除",
   moveColumn: "列を移動",
   copy: "コピー",
   cut: "切り取り",
@@ -130,6 +133,8 @@ export const ja = {
 
   // ---- Files and saving ----
   confirmDiscard: "保存していない変更があります。破棄して続けますか？",
+  discardTitle: "保存していない変更",
+  discardAndContinue: "破棄して続ける",
   loadFailed: (p: { detail: string }) => `読み込めませんでした: ${p.detail}`,
   openFailed: (p: { detail: string }) => `開けませんでした: ${p.detail}`,
   listFailed: (p: { detail: string }) => `ファイル一覧を取得できませんでした: ${p.detail}`,

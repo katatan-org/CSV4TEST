@@ -937,6 +937,11 @@
   color: var(--text-muted);
   font-size: 12px;
 }
+.c4t .prompt p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
 .c4t .prompt input {
   color: var(--text);
   font-size: 13px;
